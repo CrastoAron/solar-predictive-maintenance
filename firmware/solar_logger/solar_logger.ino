@@ -27,7 +27,7 @@ RTC_DS3231      rtc;
 
 // SD / CSV CONFIG
 const char* LOG_FILE   = "/solar_log.csv";
-const char* CSV_HEADER = "timestamp,voltage_V,current_mA,temp_C,humidity_pct,light_lux";
+const char* CSV_HEADER = "timestamp,voltage_V,current_A,temp_C,humidity_pct,light_lux";
 
 
 // SENSOR DATA STRUCT
@@ -161,7 +161,7 @@ SensorData readAllSensors() {
 
   // INA219 — voltage & current only
   d.voltage = ina219.getBusVoltage_V();
-  d.current = ina219.getCurrent_mA();
+  d.current = ina219.getCurrent_mA() / 1000.0f;
   if (d.current < 0) d.current = 0;
 
   // BME280 — temperature & humidity only

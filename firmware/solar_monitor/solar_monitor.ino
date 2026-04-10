@@ -237,9 +237,7 @@ bool connectWiFi() {
   return true;
 }
 
-// ─────────────────────────────────────────────
 // MQTT CONNECTION
-// ─────────────────────────────────────────────
 bool connectMQTT() {
   const uint8_t MAX_RETRIES = 3;
 
@@ -262,9 +260,7 @@ bool connectMQTT() {
   return false;
 }
 
-// ─────────────────────────────────────────────
 // JSON BUILDER
-// ─────────────────────────────────────────────
 String buildJSON(const SensorData &data) {
   StaticJsonDocument<256> doc;
 
@@ -280,9 +276,7 @@ String buildJSON(const SensorData &data) {
   return payload;
 }
 
-// ─────────────────────────────────────────────
 // MQTT PUBLISH
-// ─────────────────────────────────────────────
 bool publishData(const SensorData &data) {
   String payload = buildJSON(data);
 
@@ -291,9 +285,7 @@ bool publishData(const SensorData &data) {
   return mqttClient.publish(MQTT_TOPIC, payload.c_str(), true);
 }
 
-// ─────────────────────────────────────────────
 // ShutDown Peripherals
-// ─────────────────────────────────────────────
 void shutdownPeripherals() {
   Serial.flush();
 
@@ -311,9 +303,7 @@ void shutdownPeripherals() {
   delay(100);
 }
 
-// ─────────────────────────────────────────────
 // DEEP SLEEP
-// ─────────────────────────────────────────────
 void goToSleep() {
   Serial.printf("[Sleep] Sleeping for %llu minutes...\n", SLEEP_MINUTES);
   Serial.flush();
