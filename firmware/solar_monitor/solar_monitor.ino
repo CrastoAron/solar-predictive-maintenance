@@ -1,6 +1,5 @@
 /*
  * Solar Panel Monitor - ESP32 Deep Sleep + MQTT
- * Architecture: Batch Time-Series (Wake → Read → Publish → Sleep)
  *
  * Hardware:
  *   I2C Bus 0 (GPIO 21/22): DS3231 RTC, BH1750, INA219
@@ -18,9 +17,8 @@
 #include <Adafruit_BME280.h>
 #include <ArduinoJson.h>
 
-// ─────────────────────────────────────────────
+
 // USER CONFIGURATION
-// ─────────────────────────────────────────────
 #define WIFI_SSID       "YOUR_WIFI_SSID"
 #define WIFI_PASSWORD   "YOUR_WIFI_PASSWORD"
 #define MQTT_SERVER     "YOUR_MQTT_BROKER_IP"
@@ -30,16 +28,14 @@
 #define MQTT_CLIENT_ID  "solar_monitor_01"
 #define MQTT_TOPIC      "solar/sensors"
 
-// ─────────────────────────────────────────────
+
 // TIMING
-// ─────────────────────────────────────────────
 #define SLEEP_MINUTES   10ULL
 #define uS_TO_MIN       (60ULL * 1000000ULL)
 #define SLEEP_DURATION  (SLEEP_MINUTES * uS_TO_MIN)
 
-// ─────────────────────────────────────────────
+
 // I2C BUS DEFINITIONS
-// ─────────────────────────────────────────────
 #define I2C0_SDA 21
 #define I2C0_SCL 22
 
@@ -49,9 +45,7 @@
 TwoWire I2C_0 = TwoWire(0);   // RTC, BH1750, INA219
 TwoWire I2C_1 = TwoWire(1);   // BME280
 
-// ─────────────────────────────────────────────
 // SENSOR & PERIPHERAL OBJECTS
-// ─────────────────────────────────────────────
 RTC_DS3231        rtc;
 BH1750            lightMeter;
 Adafruit_INA219   ina219;
@@ -60,9 +54,8 @@ Adafruit_BME280   bme;
 WiFiClient        wifiClient;
 PubSubClient      mqttClient(wifiClient);
 
-// ─────────────────────────────────────────────
+
 // SENSOR DATA STRUCT
-// ─────────────────────────────────────────────
 struct SensorData {
   char    timestamp[17];   // "YYYY-MM-DD HH:MM"
   float   voltage;
@@ -73,9 +66,8 @@ struct SensorData {
   bool    valid;
 };
 
-// ─────────────────────────────────────────────
+
 // FORWARD DECLARATIONS
-// ─────────────────────────────────────────────
 bool    initSensors();
 bool    readSensors(SensorData &data);
 bool    connectWiFi();
@@ -84,9 +76,8 @@ bool    publishData(const SensorData &data);
 void    goToSleep();
 String  buildJSON(const SensorData &data);
 
-// ─────────────────────────────────────────────
+
 // SETUP (runs once per wake cycle)
-// ─────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);
   delay(100);
@@ -142,9 +133,8 @@ void loop() {
   // Never reached — deep sleep restarts via setup()
 }
 
-// ─────────────────────────────────────────────
+
 // SENSOR INIT
-// ─────────────────────────────────────────────
 bool initSensors() {
   // RTC
   if (!rtc.begin(&I2C_0)) {
@@ -176,9 +166,8 @@ bool initSensors() {
   return true;
 }
 
-// ─────────────────────────────────────────────
+
 // SENSOR READ
-// ─────────────────────────────────────────────
 bool readSensors(SensorData &data) {
   data.valid = false;
 
@@ -222,9 +211,8 @@ bool readSensors(SensorData &data) {
   return true;
 }
 
-// ─────────────────────────────────────────────
+
 // WIFI CONNECTION
-// ─────────────────────────────────────────────
 bool connectWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
