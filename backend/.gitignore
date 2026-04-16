@@ -1,0 +1,30 @@
+# --- Virtualenvs ---
+venv/
+.venv/
+
+# --- Env / secrets ---
+.env
+.env.*
+serviceAccountKey.json
+
+# --- Generated ML assets (local/dev) ---
+ml_models/
+
+# --- Python cache / artifacts ---
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+
+# --- Logs ---
+*.log
+
+# --- Editor / OS ---
+.DS_Store
+.idea/
+.vscode/

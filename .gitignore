@@ -1,0 +1,7 @@
+backend/serviceAccountKey.json
+serviceAccountKey.json
+.env
+backend/.env
+__pycache__/
+.pytest_cache/
+

@@ -30,6 +30,12 @@ export default function DashboardPage() {
   const fetchLive = useCallback(async () => {
     try {
       const data = await getLive();
+      // Backend can legitimately return `null` when no sensor data exists yet.
+      if (!data) {
+        setLive(null);
+        return;
+      }
+
       setLive(data);
       setLastUpdated(new Date());
       setChartData((prev) => {
