@@ -1,0 +1,16 @@
+{
+  "feature_order": [
+    "voltage_mean",
+    "voltage_std",
+    "current_mean",
+    "current_std",
+    "power_mean",
+    "power_std",
+    "lux_mean",
+    "temperature_mean",
+    "humidity_mean",
+    "power_rate_of_change",
+    "voltage_rate_of_change",
+    "efficiency_ratio"
+  ]
+}
