@@ -21,6 +21,11 @@ export default function DashboardPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const predIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Demo-friendly polling intervals (ms)
+  const LIVE_POLL_MS = 5_000;
+  const PRED_POLL_MS = 10_000;
 
   // Redirect if not authed
   useEffect(() => {
@@ -47,28 +52,44 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const fetchPredictions = useCallback(async () => {
+    try {
+      const p = await getPredictions();
+      setPredictions(p);
+    } catch (e) {
+      console.error(e);
+      setPredictions(null);
+    }
+  }, []);
+
   useEffect(() => {
     if (!user) return;
     fetchLive();
-    getPredictions().then(setPredictions);
+    fetchPredictions();
     // Also seed chart with history
     const now = new Date();
     const start = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
-    getHistory(start, now.toISOString(), "power").then((h) => {
-      setChartData(h.data);
-    });
+    getHistory(start, now.toISOString(), "power")
+      .then((h) => {
+        setChartData(h.data);
+      })
+      .catch((e) => {
+        console.error(e);
+        setChartData([]);
+      });
 
-    intervalRef.current = setInterval(fetchLive, 30_000);
+    intervalRef.current = setInterval(fetchLive, LIVE_POLL_MS);
+    predIntervalRef.current = setInterval(fetchPredictions, PRED_POLL_MS);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
+      if (predIntervalRef.current) clearInterval(predIntervalRef.current);
     };
-  }, [user, fetchLive]);
+  }, [user, fetchLive, fetchPredictions]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
     await fetchLive();
-    const p = await getPredictions();
-    setPredictions(p);
+    await fetchPredictions();
     setRefreshing(false);
   };
 

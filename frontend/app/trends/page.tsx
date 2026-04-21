@@ -40,6 +40,9 @@ export default function TrendsPage() {
       const end = new Date(endDate + "T23:59:59Z").toISOString();
       const res = await getHistory(start, end, field);
       setData(res.data);
+    } catch (e) {
+      console.error(e);
+      setData([]);
     } finally {
       setLoading(false);
     }

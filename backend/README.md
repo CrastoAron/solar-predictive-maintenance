@@ -35,6 +35,7 @@ ML-driven predictive maintenance and efficiency analysis backend for solar panel
   - `scheduler.py`: periodic batch prediction job
   - `firebase_admin.py`: Firebase token verification
 - `scripts/generate_dummy_models.py`: generates test ML assets for local development
+- `scripts/simulate_sensor.py`: publishes simulated sensor readings to MQTT (for end-to-end testing)
 - `ml_models/`: ML assets (created locally; not required to be committed)
 
 ## Requirements
@@ -162,6 +163,37 @@ Health check (no auth):
 
 ```bash
 curl http://localhost:8000/health
+```
+
+### 5) Simulate sensor readings (end-to-end testing)
+
+If you don’t have ESP32 hardware connected yet, you can publish simulated sensor readings to MQTT.
+The backend will ingest them into InfluxDB, the frontend will update live metrics, and the scheduler can generate predictions/alerts.
+
+Run (mixed normal/degraded/fault samples):
+
+```bash
+cd backend
+source .venv/bin/activate
+python3 scripts/simulate_sensor.py --host localhost --port 1883 --topic solar/sensors --interval 2
+```
+
+Force only fault samples:
+
+```bash
+python3 scripts/simulate_sensor.py --mode fault
+```
+
+Tune fault/degraded frequency (when `--mode mixed`):
+
+```bash
+python3 scripts/simulate_sensor.py --mode mixed --fault-prob 0.10 --degraded-prob 0.25
+```
+
+Send a fixed number of messages then exit:
+
+```bash
+python3 scripts/simulate_sensor.py --count 50
 ```
 
 ## Data ingestion contract (MQTT payload)

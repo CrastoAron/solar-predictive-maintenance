@@ -25,6 +25,7 @@ export default function MaintenancePage() {
   const [maint, setMaint] = useState<MaintenanceData | null>(null);
   const [pred, setPred] = useState<PredictionData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   useEffect(() => {
     if (!user) router.replace("/login");
@@ -32,12 +33,28 @@ export default function MaintenancePage() {
 
   useEffect(() => {
     if (!user) return;
-    Promise.all([getMaintenance(), getPredictions()])
-      .then(([m, p]) => {
+    let cancelled = false;
+
+    const fetchAll = async () => {
+      try {
+        const [m, p] = await Promise.all([getMaintenance(), getPredictions()]);
+        if (cancelled) return;
         setMaint(m);
         setPred(p);
-      })
-      .finally(() => setLoading(false));
+        setLastUpdated(new Date());
+      } catch (e) {
+        console.error(e);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    fetchAll();
+    const id = setInterval(fetchAll, 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, [user]);
 
   const daysLeft = maint?.days_remaining ?? pred?.maintenance_days ?? 0;
@@ -58,6 +75,9 @@ export default function MaintenancePage() {
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-white">Maintenance</h1>
           <p className="text-slate-400 text-sm mt-1">Predictive service schedule</p>
+          <p className="text-slate-500 text-xs mt-1">
+            {lastUpdated ? `Auto-refresh: ${lastUpdated.toLocaleTimeString()}` : "Auto-refreshing…"}
+          </p>
         </div>
 
         {loading ? (

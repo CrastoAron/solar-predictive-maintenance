@@ -69,6 +69,35 @@ class InfluxClient:
         self._client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
         self._write_api = self._client.write_api(write_options=SYNCHRONOUS)
         self._query_api = self._client.query_api()
+        self._ensure_buckets_exist()
+
+    def _ensure_buckets_exist(self) -> None:
+        """
+        Ensures required buckets exist.
+
+        This avoids demo-time failures where `solar_predictions` / `solar_alerts` were not created
+        in a fresh InfluxDB instance yet.
+
+        If the configured token/org does not have permission to list/create buckets, this will
+        fail silently and the caller will still see the underlying Influx errors on read/write.
+        """
+        try:
+            orgs_api = self._client.organizations_api()
+            orgs = orgs_api.find_organizations(org=INFLUX_ORG) or []
+            if not orgs:
+                return
+            org_id = orgs[0].id
+
+            buckets_api = self._client.buckets_api()
+            required = [INFLUX_BUCKET_RAW, INFLUX_BUCKET_PREDICTIONS, INFLUX_BUCKET_ALERTS]
+            for name in required:
+                if not name:
+                    continue
+                if buckets_api.find_bucket_by_name(name) is None:
+                    buckets_api.create_bucket(bucket_name=name, org_id=org_id)
+        except Exception:
+            # Don't block app startup; Influx permissions/config may vary by environment.
+            return
 
     def close(self) -> None:
         self._client.close()

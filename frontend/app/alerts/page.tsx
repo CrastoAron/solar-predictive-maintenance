@@ -13,6 +13,7 @@ export default function AlertsPage() {
   const router = useRouter();
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   useEffect(() => {
     if (!user) router.replace("/login");
@@ -20,9 +21,27 @@ export default function AlertsPage() {
 
   useEffect(() => {
     if (!user) return;
-    getAlerts()
-      .then((d) => setAlerts(d.alerts))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+
+    const fetchAlerts = async () => {
+      try {
+        const d = await getAlerts();
+        if (cancelled) return;
+        setAlerts(d.alerts);
+        setLastUpdated(new Date());
+      } catch (e) {
+        console.error(e);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    fetchAlerts();
+    const id = setInterval(fetchAlerts, 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, [user]);
 
   const highCount = alerts.filter((a) => a.severity === "high" && !a.resolved).length;
@@ -37,6 +56,9 @@ export default function AlertsPage() {
             <h1 className="text-2xl font-bold text-white">Alerts</h1>
             <p className="text-slate-400 text-sm mt-1">
               {openCount} open · {highCount} critical
+            </p>
+            <p className="text-slate-500 text-xs mt-1">
+              {lastUpdated ? `Auto-refresh: ${lastUpdated.toLocaleTimeString()}` : "Auto-refreshing…"}
             </p>
           </div>
           {highCount > 0 && (

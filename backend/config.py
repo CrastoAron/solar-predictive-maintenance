@@ -65,7 +65,13 @@ EFFICIENCY_ALERT_MAX_SCORE: float = float(_getenv("EFFICIENCY_ALERT_MAX_SCORE", 
 
 # Paths
 BASE_DIR = Path(__file__).resolve().parent
-ML_MODELS_DIR = BASE_DIR / "ml_models"
+REPO_ROOT = BASE_DIR.parent
+
+# Prefer the canonical trained models in `model/ml_models/` if present.
+# Fallback to `backend/ml_models/` for local/dev experiments.
+_preferred_models_dir = REPO_ROOT / "model" / "ml_models"
+ML_MODELS_DIR = _preferred_models_dir if _preferred_models_dir.exists() else (BASE_DIR / "ml_models")
+
 RF_MODEL_PATH = Path(_getenv("RF_MODEL_PATH", str(ML_MODELS_DIR / "rf_classifier.pkl")))
 XGB_MODEL_PATH = Path(_getenv("XGB_MODEL_PATH", str(ML_MODELS_DIR / "xgb_regressor.pkl")))
 FEATURES_JSON_PATH = Path(_getenv("FEATURES_JSON_PATH", str(ML_MODELS_DIR / "features.json")))

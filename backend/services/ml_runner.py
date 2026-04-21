@@ -40,13 +40,37 @@ class MLRunner:
                 "ML assets are not ready. Ensure rf_classifier.pkl, xgb_regressor.pkl, and features.json exist."
             )
 
-        X = pd.DataFrame([features])[self.feature_order]
-        fault_class = int(self.rf_model.predict(X)[0])
+        # Be tolerant to minor feature mismatches between training and runtime.
+        # - Missing features are filled with 0.0
+        # - Extra features are ignored
+        row: dict[str, float] = {}
+        for name in self.feature_order:
+            val = features.get(name)
+            row[name] = float(val) if val is not None else 0.0
+
+        X = pd.DataFrame([row], columns=self.feature_order)
+
+        fault_pred = self.rf_model.predict(X)
+        fault_class = int(fault_pred[0]) if hasattr(fault_pred, "__len__") else int(fault_pred)
         fault_label = FAULT_LABELS[fault_class] if 0 <= fault_class < len(FAULT_LABELS) else "Unknown"
 
-        xgb_out = self.xgb_model.predict(X)[0]
-        efficiency_score = float(np.clip(xgb_out[0], 0, 100))
-        maintenance_days = int(np.clip(round(xgb_out[1]), 0, 365))
+        reg_pred = self.xgb_model.predict(X)
+        # Common shapes:
+        # - (n_samples, 2) for multi-output regressors
+        # - (n_samples,) for single-output regressors
+        # - list/tuple of length 2 for a single sample
+        first = reg_pred[0] if hasattr(reg_pred, "__len__") else reg_pred
+
+        if isinstance(first, (list, tuple, np.ndarray)) and len(first) >= 2:
+            efficiency_raw = float(first[0])
+            maintenance_raw = float(first[1])
+        else:
+            # If the regressor only outputs efficiency, default maintenance to 30 days.
+            efficiency_raw = float(first if not isinstance(first, (list, tuple, np.ndarray)) else first[0])
+            maintenance_raw = 30.0
+
+        efficiency_score = float(np.clip(efficiency_raw, 0, 100))
+        maintenance_days = int(np.clip(round(maintenance_raw), 0, 365))
 
         return {
             "fault_class": fault_class,
