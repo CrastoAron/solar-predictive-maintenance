@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth-context";
 import { getHistory, getHistoryMeta, HistoryPoint } from "@/lib/api";
 import NavSidebar from "@/components/ui/NavSidebar";
 import LineChart from "@/components/ui/LineChart";
+import ErrorState from "@/components/ui/ErrorState";
 import { format, subDays } from "date-fns";
 
 const FIELDS = ["power", "voltage", "current", "temperature", "humidity", "lux"];
@@ -28,6 +29,7 @@ export default function TrendsPage() {
   const [endDate, setEndDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [data, setData] = useState<HistoryPoint[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) router.replace("/login");
@@ -54,9 +56,11 @@ export default function TrendsPage() {
       const end = new Date(endDate + "T23:59:59Z").toISOString();
       const res = await getHistory(start, end, field);
       setData(res.data);
+      setError(null);
     } catch (e) {
       console.error(e);
       setData([]);
+      setError("Failed to load trend data. Check the backend and selected date range.");
     } finally {
       setLoading(false);
     }
@@ -70,10 +74,10 @@ export default function TrendsPage() {
   return (
     <div className="flex min-h-screen bg-[#0f1117]">
       <NavSidebar />
-      <main className="page-shell flex-1">
+      <main className="page-shell page-shell-top flex-1">
         <div className="mb-8">
-          <h1 className="text-2xl font-bold text-white">Trends</h1>
-          <p className="text-slate-400 text-sm mt-1">Historical sensor data</p>
+          <h1 className="text-3xl font-bold text-white">Trends</h1>
+          <p className="text-slate-400 text-base mt-1">Historical sensor data</p>
         </div>
 
         {/* Controls */}
@@ -134,7 +138,9 @@ export default function TrendsPage() {
             </span>
           </div>
 
-          {loading ? (
+          {error ? (
+            <ErrorState message={error} onRetry={fetchData} />
+          ) : loading ? (
             <div className="space-y-3">
               <div className="skeleton h-4 w-3/4" />
               <div className="skeleton h-56 w-full" />

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { getMaintenance, getPredictions, MaintenanceData, PredictionData } from "@/lib/api";
 import NavSidebar from "@/components/ui/NavSidebar";
+import ErrorState from "@/components/ui/ErrorState";
 import { Wrench, Calendar, TrendingUp, TrendingDown, Minus, Clock } from "lucide-react";
 
 function TrendIcon({ trend }: { trend: string }) {
@@ -25,6 +26,7 @@ export default function MaintenancePage() {
   const [maint, setMaint] = useState<MaintenanceData | null>(null);
   const [pred, setPred] = useState<PredictionData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   useEffect(() => {
@@ -42,8 +44,10 @@ export default function MaintenancePage() {
         setMaint(m);
         setPred(p);
         setLastUpdated(new Date());
+        setError(null);
       } catch (e) {
         console.error(e);
+        if (!cancelled) setError("Failed to load maintenance data.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -71,16 +75,19 @@ export default function MaintenancePage() {
   return (
     <div className="flex min-h-screen bg-[#0f1117]">
       <NavSidebar />
-      <main className="page-shell flex-1">
+      <main className="page-shell page-shell-top flex-1">
         <div className="mb-8">
-          <h1 className="text-2xl font-bold text-white">Maintenance</h1>
-          <p className="text-slate-400 text-sm mt-1">Predictive service schedule</p>
-          <p className="text-slate-500 text-xs mt-1">
+          <h1 className="text-3xl font-bold text-white">Maintenance</h1>
+          <p className="text-slate-400 text-base mt-1">Predictive service schedule</p>
+          <p className="text-slate-500 text-sm mt-1">
             {lastUpdated ? `Auto-refresh: ${lastUpdated.toLocaleTimeString()}` : "Auto-refreshing…"}
           </p>
         </div>
 
-        {loading ? (
+        {/* Error state */}
+        {error && !loading ? (
+          <ErrorState message={error} onRetry={() => window.location.reload()} />
+        ) : loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="skeleton h-48 rounded-2xl" />
             <div className="skeleton h-48 rounded-2xl" />

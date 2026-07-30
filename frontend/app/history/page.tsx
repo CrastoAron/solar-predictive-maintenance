@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { getHistory, getHistoryMeta, HistoryPoint } from "@/lib/api";
 import NavSidebar from "@/components/ui/NavSidebar";
+import ErrorState from "@/components/ui/ErrorState";
 import { format, subDays } from "date-fns";
 import { Download, ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -21,6 +22,7 @@ export default function HistoryPage() {
   const [data, setData] = useState<HistoryPoint[]>([]);
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) router.replace("/login");
@@ -34,9 +36,11 @@ export default function HistoryPage() {
       const end = new Date(endDate + "T23:59:59Z").toISOString();
       const res = await getHistory(start, end, field);
       setData(res.data);
+      setError(null);
     } catch (e) {
       console.error(e);
       setData([]);
+      setError("Failed to load history. Check the backend and date range.");
     } finally {
       setLoading(false);
     }
@@ -79,11 +83,11 @@ export default function HistoryPage() {
   return (
     <div className="flex min-h-screen bg-[#0f1117]">
       <NavSidebar />
-      <main className="page-shell flex-1">
+      <main className="page-shell page-shell-top flex-1">
         <div className="flex items-start justify-between mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-white">History</h1>
-            <p className="text-slate-400 text-sm mt-1">
+            <h1 className="text-3xl font-bold text-white">History</h1>
+            <p className="text-slate-400 text-base mt-1">
               {data.length} records · {totalPages} pages
             </p>
           </div>
@@ -135,7 +139,10 @@ export default function HistoryPage() {
           </div>
         </div>
 
-        {/* Table */}
+        {/* Error state */}
+        {error && !loading ? (
+          <ErrorState message={error} onRetry={fetchData} />
+        ) : (
         <div className="glass-card overflow-hidden">
           {loading ? (
             <div className="p-6 space-y-3">
@@ -170,10 +177,10 @@ export default function HistoryPage() {
                         key={row.timestamp}
                         className="border-b border-white/5 hover:bg-white/[0.02] transition-colors"
                       >
-                        <td className="px-4 py-3 text-xs text-slate-500">
+                        <td className="px-4 py-3 text-sm text-slate-500">
                           {page * PAGE_SIZE + i + 1}
                         </td>
-                        <td className="px-4 py-3 text-xs text-slate-400">
+                        <td className="px-4 py-3 text-sm text-slate-400">
                           {new Date(row.timestamp).toLocaleString()}
                         </td>
                         <td className="px-4 py-3 text-sm text-white font-medium">
@@ -187,7 +194,7 @@ export default function HistoryPage() {
 
               {/* Pagination */}
               <div className="flex items-center justify-between px-4 py-4 border-t border-white/5">
-                <span className="text-xs text-slate-500">
+                <span className="text-sm text-slate-500">
                   Page {page + 1} of {totalPages} · {data.length} total rows
                 </span>
                 <div className="flex items-center gap-2">
@@ -210,6 +217,7 @@ export default function HistoryPage() {
             </>
           )}
         </div>
+        )}
       </main>
     </div>
   );

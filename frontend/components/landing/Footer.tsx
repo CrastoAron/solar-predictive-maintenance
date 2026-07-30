@@ -16,7 +16,7 @@ export default function Footer() {
               <span className="text-white font-bold text-lg">SolarShield</span>
             </div>
             <p className="text-slate-500 text-sm text-center md:text-left max-w-xs">
-              Next-generation solar panel monitoring and predictive maintenance, 
+              Next-generation solar panel monitoring and predictive maintenance,
               powered by IoT and Machine Learning.
             </p>
           </div>
@@ -34,9 +34,9 @@ export default function Footer() {
             <p className="text-white font-semibold mb-4">Join Community</p>
             <div className="flex items-center gap-4">
               {[Globe, Send, Briefcase, Camera].map((Icon, i) => (
-                <Link 
-                  key={i} 
-                  href="#" 
+                <Link
+                  key={i}
+                  href="#"
                   className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-slate-400 hover:bg-orange-500 hover:text-white transition-all duration-300"
                 >
                   <Icon className="w-4 h-4" />

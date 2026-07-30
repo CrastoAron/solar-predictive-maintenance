@@ -36,9 +36,8 @@ export default function StatusBadge({ status, large }: StatusBadgeProps) {
 
   return (
     <span
-      className={`inline-flex items-center gap-2 rounded-full ring-1 ${cfg.bg} ${cfg.text} ${cfg.ring} ${
-        large ? "px-5 py-2 text-base font-semibold" : "px-3 py-1 text-xs font-medium"
-      }`}
+      className={`inline-flex items-center gap-2 rounded-full ring-1 ${cfg.bg} ${cfg.text} ${cfg.ring} ${large ? "px-5 py-2 text-base font-semibold" : "px-3 py-1 text-xs font-medium"
+        }`}
     >
       <span className={`rounded-full flex-shrink-0 ${cfg.dot} ${large ? "w-2.5 h-2.5" : "w-1.5 h-1.5"} animate-pulse`} />
       {cfg.label}

@@ -6,6 +6,7 @@
 @layer base {
   :root {
     color-scheme: dark;
+    font-size: 16px;
   }
 
   * {
@@ -37,8 +38,15 @@
 }
 
 @layer utilities {
+  /* On mobile: no left margin (sidebar overlays).
+     On lg+: shift content right of the 256px sidebar. */
   .page-shell {
-    @apply ml-64 min-h-screen p-8 bg-[#0f1117];
+    @apply ml-0 lg:ml-64 min-h-screen p-4 sm:p-6 lg:p-8 bg-[#0f1117];
+  }
+
+  /* Top bar spacer on mobile so content doesn't hide under the nav bar */
+  .page-shell-top {
+    @apply pt-16 lg:pt-0;
   }
 
   .glass-card {
@@ -46,21 +54,45 @@
   }
 
   .section-title {
-    @apply text-lg font-semibold text-white;
+    @apply text-xl font-semibold text-white;
   }
 
   .section-sub {
-    @apply text-sm text-slate-400;
+    @apply text-base text-slate-400;
   }
 
+  /* Shimmer skeleton — replaces animate-pulse with a moving highlight sweep */
   .skeleton {
-    @apply animate-pulse bg-white/5 rounded-xl;
+    @apply bg-white/[0.04] rounded-xl relative overflow-hidden;
+  }
+
+  .skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.055) 50%,
+      transparent 100%
+    );
+    animation: shimmer 1.8s ease-in-out infinite;
+  }
+
+  /* Mobile sidebar overlay backdrop */
+  .sidebar-overlay {
+    @apply fixed inset-0 bg-black/60 backdrop-blur-sm z-30 lg:hidden;
   }
 
   /* ─── Animations ──────────────────────────────────────────────────── */
   @keyframes fade-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    from {
+      opacity: 0;
+    }
+
+    to {
+      opacity: 1;
+    }
   }
 
   @keyframes fade-in-up {
@@ -68,10 +100,31 @@
       opacity: 0;
       transform: translateY(20px);
     }
+
     to {
       opacity: 1;
       transform: translateY(0);
     }
+  }
+
+  @keyframes slide-in-left {
+    from {
+      transform: translateX(-100%);
+    }
+
+    to {
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes shimmer {
+    from { transform: translateX(-100%); }
+    to   { transform: translateX(100%); }
+  }
+
+  @keyframes toast-drain {
+    from { width: 100%; }
+    to   { width: 0%; }
   }
 
   .animate-fade-in {
@@ -80,5 +133,9 @@
 
   .animate-fade-in-up {
     animation: fade-in-up 1s ease-out forwards;
+  }
+
+  .animate-slide-in-left {
+    animation: slide-in-left 0.25s ease-out forwards;
   }
 }
