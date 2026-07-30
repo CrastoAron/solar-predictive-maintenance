@@ -94,7 +94,29 @@ export const getHistory = (
   end: string,
   field: string
 ) =>
-  apiFetch<HistoryData>(`/api/history?start=${start}&end=${end}&field=${field}`);
+  fetch(`/api/history?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&field=${encodeURIComponent(field)}`, {
+    headers: {
+      "Content-Type": "application/json",
+    },
+  }).then(async (res) => {
+    if (!res.ok) throw new Error(`History request failed: ${res.status}`);
+    return (await res.json()) as HistoryData;
+  });
+
+export interface HistoryMeta {
+  earliest: string | null;
+  folders: { name: string; earliest: string | null }[];
+}
+
+export const getHistoryMeta = () =>
+  fetch("/api/history/meta", {
+    headers: {
+      "Content-Type": "application/json",
+    },
+  }).then(async (res) => {
+    if (!res.ok) throw new Error(`History meta request failed: ${res.status}`);
+    return (await res.json()) as HistoryMeta;
+  });
 
 export const getPredictions = () =>
   apiFetch<PredictionData | null>("/api/predictions");

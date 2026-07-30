@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { getHistory, HistoryPoint } from "@/lib/api";
+import { getHistory, getHistoryMeta, HistoryPoint } from "@/lib/api";
 import NavSidebar from "@/components/ui/NavSidebar";
 import LineChart from "@/components/ui/LineChart";
 import { format, subDays } from "date-fns";
@@ -24,7 +24,7 @@ export default function TrendsPage() {
   const router = useRouter();
 
   const [field, setField] = useState("power");
-  const [startDate, setStartDate] = useState(format(subDays(new Date(), 1), "yyyy-MM-dd"));
+  const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [data, setData] = useState<HistoryPoint[]>([]);
   const [loading, setLoading] = useState(false);
@@ -32,6 +32,20 @@ export default function TrendsPage() {
   useEffect(() => {
     if (!user) router.replace("/login");
   }, [user, router]);
+
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      try {
+        const meta = await getHistoryMeta();
+        if (meta?.earliest) setStartDate(format(new Date(meta.earliest), "yyyy-MM-dd"));
+        else setStartDate(format(subDays(new Date(), 1), "yyyy-MM-dd"));
+      } catch (e) {
+        console.error("failed to load trends meta", e);
+        setStartDate(format(subDays(new Date(), 1), "yyyy-MM-dd"));
+      }
+    })();
+  }, [user]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -49,7 +63,7 @@ export default function TrendsPage() {
   };
 
   useEffect(() => {
-    if (user) fetchData();
+    if (user && startDate) fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, field, startDate, endDate]);
 

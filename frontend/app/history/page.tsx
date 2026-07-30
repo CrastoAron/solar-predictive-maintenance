@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { getHistory, HistoryPoint } from "@/lib/api";
+import { getHistory, getHistoryMeta, HistoryPoint } from "@/lib/api";
 import NavSidebar from "@/components/ui/NavSidebar";
 import { format, subDays } from "date-fns";
 import { Download, ChevronLeft, ChevronRight } from "lucide-react";
@@ -16,7 +16,7 @@ export default function HistoryPage() {
   const router = useRouter();
 
   const [field, setField] = useState("power");
-  const [startDate, setStartDate] = useState(format(subDays(new Date(), 7), "yyyy-MM-dd"));
+  const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [data, setData] = useState<HistoryPoint[]>([]);
   const [page, setPage] = useState(0);
@@ -43,8 +43,23 @@ export default function HistoryPage() {
   }, [startDate, endDate, field]);
 
   useEffect(() => {
-    if (user) fetchData();
-  }, [user, fetchData]);
+    if (!user) return;
+    // load earliest available date from server and set startDate
+    (async () => {
+      try {
+        const meta = await getHistoryMeta();
+        if (meta?.earliest) setStartDate(format(new Date(meta.earliest), "yyyy-MM-dd"));
+        else setStartDate(format(subDays(new Date(), 7), "yyyy-MM-dd"));
+      } catch (e) {
+        console.error("failed to load history meta", e);
+        setStartDate(format(subDays(new Date(), 7), "yyyy-MM-dd"));
+      }
+    })();
+  }, [user]);
+
+  useEffect(() => {
+    if (user && startDate) fetchData();
+  }, [user, startDate, fetchData]);
 
   const totalPages = Math.ceil(data.length / PAGE_SIZE);
   const pageData = data.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
