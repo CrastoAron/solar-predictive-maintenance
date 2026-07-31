@@ -54,6 +54,40 @@ Adafruit_BME280   bme;
 WiFiClient        wifiClient;
 PubSubClient      mqttClient(wifiClient);
 
+// HARDWARE DIAGNOSTICS
+// These numeric values are sent in every MQTT telemetry payload.
+enum HardwareStatusCode : uint8_t {
+  STATUS_OK = 0,
+  STATUS_INITIALIZATION_FAILED = 1,
+  STATUS_DEVICE_NOT_FOUND = 2,
+  STATUS_INVALID_DATA = 3,
+  STATUS_READ_ERROR = 4,
+  STATUS_DEVICE_SPECIFIC_ERROR = 5
+};
+
+struct HardwareStatus {
+  uint8_t bme280;
+  uint8_t ina219;
+  uint8_t bh1750;
+  uint8_t ds3231;
+};
+
+HardwareStatus hardwareStatus = {
+  STATUS_INITIALIZATION_FAILED,
+  STATUS_INITIALIZATION_FAILED,
+  STATUS_INITIALIZATION_FAILED,
+  STATUS_INITIALIZATION_FAILED
+};
+
+bool bme280Ready = false;
+bool ina219Ready = false;
+bool bh1750Ready = false;
+bool ds3231Ready = false;
+bool bme280ReadThisCycle = false;
+bool ina219ReadThisCycle = false;
+bool bh1750ReadThisCycle = false;
+bool ds3231ReadThisCycle = false;
+
 
 // SENSOR DATA STRUCT
 struct SensorData {
@@ -75,6 +109,13 @@ bool    connectMQTT();
 bool    publishData(const SensorData &data);
 void    goToSleep();
 String  buildJSON(const SensorData &data);
+void    updateHardwareStatus();
+void    validateSensorReadings(SensorData &data);
+void    appendHardwareStatus(JsonDocument &doc);
+void    printHardwareStatus();
+void    setHardwareStatus(const char *device, uint8_t &status, uint8_t nextStatus);
+bool    isValidRtcTime(const DateTime &time);
+bool    isI2CDeviceResponsive(TwoWire &bus, uint8_t address);
 
 
 // SETUP (runs once per wake cycle)
@@ -90,17 +131,11 @@ void setup() {
 
   SensorData data;
 
-  if (!initSensors()) {
-    Serial.println(F("[ERROR] Sensor init failed. Sleeping."));
-    goToSleep();
-    return;
-  }
+  initSensors();
 
-  if (!readSensors(data)) {
-    Serial.println(F("[ERROR] Sensor read failed. Sleeping."));
-    goToSleep();
-    return;
-  }
+  // A failed sensor is diagnostic information, not a reason to prevent the
+  // remaining healthy sensors from publishing telemetry.
+  readSensors(data);
 
   // WiFi on only when needed
   if (!connectWiFi()) {
@@ -136,79 +171,233 @@ void loop() {
 
 // SENSOR INIT
 bool initSensors() {
+  Serial.println(F("[Diagnostics] Initializing hardware..."));
+
   // RTC
   if (!rtc.begin(&I2C_0)) {
     Serial.println(F("[ERROR] DS3231 not found"));
-    return false;
-  }
-  if (rtc.lostPower()) {
-    Serial.println(F("[WARN] RTC lost power — time may be wrong"));
+    setHardwareStatus("DS3231", hardwareStatus.ds3231, STATUS_DEVICE_NOT_FOUND);
+  } else {
+    ds3231Ready = true;
+    if (rtc.lostPower()) {
+      Serial.println(F("[WARN] DS3231 lost power — time may be wrong"));
+      setHardwareStatus("DS3231", hardwareStatus.ds3231, STATUS_DEVICE_SPECIFIC_ERROR);
+    } else {
+      setHardwareStatus("DS3231", hardwareStatus.ds3231, STATUS_OK);
+    }
   }
 
   // INA219 (I2C Bus 0, default address 0x40)
   if (!ina219.begin(&I2C_0)) {
     Serial.println(F("[ERROR] INA219 not found"));
-    return false;
+    setHardwareStatus("INA219", hardwareStatus.ina219, STATUS_DEVICE_NOT_FOUND);
+  } else {
+    ina219Ready = true;
+    Serial.println(F("[OK] INA219 initialized"));
+    setHardwareStatus("INA219", hardwareStatus.ina219, STATUS_OK);
   }
 
   // BH1750 (I2C Bus 0)
   if (!lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE, 0x23, &I2C_0)) {
     Serial.println(F("[ERROR] BH1750 not found"));
-    return false;
+    setHardwareStatus("BH1750", hardwareStatus.bh1750, STATUS_DEVICE_NOT_FOUND);
+  } else {
+    bh1750Ready = true;
+    Serial.println(F("[OK] BH1750 initialized"));
+    setHardwareStatus("BH1750", hardwareStatus.bh1750, STATUS_OK);
   }
 
   // BME280 (I2C Bus 1, default address 0x76)
   if (!bme.begin(0x76, &I2C_1)) {
     Serial.println(F("[ERROR] BME280 not found"));
-    return false;
+    setHardwareStatus("BME280", hardwareStatus.bme280, STATUS_DEVICE_NOT_FOUND);
+  } else {
+    bme280Ready = true;
+    Serial.println(F("[OK] BME280 initialized"));
+    setHardwareStatus("BME280", hardwareStatus.bme280, STATUS_OK);
   }
 
-  return true;
+  printHardwareStatus();
+  return bme280Ready || ina219Ready || bh1750Ready || ds3231Ready;
 }
 
 
 // SENSOR READ
 bool readSensors(SensorData &data) {
   data.valid = false;
+  bme280ReadThisCycle = false;
+  ina219ReadThisCycle = false;
+  bh1750ReadThisCycle = false;
+  ds3231ReadThisCycle = false;
+  // Use numeric fallbacks so the existing MQTT fields remain present even
+  // when one peripheral is unavailable. hardware_status identifies the fault.
+  data.voltage = 0.0f;
+  data.current = 0.0f;
+  data.temperature = 0.0f;
+  data.humidity = 0.0f;
+  data.light = 0.0f;
+  snprintf(data.timestamp, sizeof(data.timestamp), "1970-01-01 00:00");
 
   // RTC timestamp
-  DateTime now = rtc.now();
-  snprintf(data.timestamp, sizeof(data.timestamp),
-           "%04d-%02d-%02d %02d:%02d",
-           now.year(), now.month(), now.day(),
-           now.hour(), now.minute());
+  if (ds3231Ready) {
+    if (!isI2CDeviceResponsive(I2C_0, 0x68)) {
+      Serial.println(F("[ERROR] DS3231 I2C communication failed"));
+      setHardwareStatus("DS3231", hardwareStatus.ds3231, STATUS_READ_ERROR);
+    } else {
+      DateTime now = rtc.now();
+      if (isValidRtcTime(now)) {
+        snprintf(data.timestamp, sizeof(data.timestamp),
+                 "%04d-%02d-%02d %02d:%02d",
+                 now.year(), now.month(), now.day(),
+                 now.hour(), now.minute());
+        ds3231ReadThisCycle = true;
+      } else {
+        Serial.println(F("[ERROR] DS3231 returned an invalid timestamp"));
+        setHardwareStatus("DS3231", hardwareStatus.ds3231, STATUS_READ_ERROR);
+      }
+    }
+  }
 
   // INA219: Voltage & Current
-  data.voltage = ina219.getBusVoltage_V();
-  data.current = ina219.getCurrent_mA() / 1000.0f;   // Convert to Amps
+  if (ina219Ready) {
+    if (!isI2CDeviceResponsive(I2C_0, 0x40)) {
+      Serial.println(F("[ERROR] INA219 I2C communication failed"));
+      setHardwareStatus("INA219", hardwareStatus.ina219, STATUS_READ_ERROR);
+    } else {
+      data.voltage = ina219.getBusVoltage_V();
+      data.current = ina219.getCurrent_mA() / 1000.0f;   // Convert to Amps
+      ina219ReadThisCycle = true;
+    }
+  }
 
   // BH1750: Light
-  if (!lightMeter.measurementReady(true)) {
-    delay(200);   // Wait for measurement to complete
+  if (bh1750Ready) {
+    if (!isI2CDeviceResponsive(I2C_0, 0x23)) {
+      Serial.println(F("[ERROR] BH1750 I2C communication failed"));
+      setHardwareStatus("BH1750", hardwareStatus.bh1750, STATUS_READ_ERROR);
+    } else {
+      if (!lightMeter.measurementReady(true)) {
+        Serial.println(F("[WARN] BH1750 measurement not ready; waiting"));
+        delay(200);   // Wait for measurement to complete
+      }
+      data.light = lightMeter.readLightLevel();
+      bh1750ReadThisCycle = true;
+    }
   }
-  data.light = lightMeter.readLightLevel();
 
   // BME280: Temperature & Humidity
-  data.temperature = bme.readTemperature();
-  data.humidity    = bme.readHumidity();
-
-  // Basic sanity checks
-  if (isnan(data.temperature) || isnan(data.humidity)) {
-    Serial.println(F("[ERROR] BME280 returned NaN"));
-    return false;
-  }
-  if (data.light < 0) {
-    Serial.println(F("[ERROR] BH1750 returned invalid reading"));
-    return false;
+  if (bme280Ready) {
+    if (!isI2CDeviceResponsive(I2C_1, 0x76)) {
+      Serial.println(F("[ERROR] BME280 I2C communication failed"));
+      setHardwareStatus("BME280", hardwareStatus.bme280, STATUS_READ_ERROR);
+    } else {
+      data.temperature = bme.readTemperature();
+      data.humidity    = bme.readHumidity();
+      bme280ReadThisCycle = true;
+    }
   }
 
-  data.valid = true;
+  validateSensorReadings(data);
+  updateHardwareStatus();
+
+  data.valid = bme280Ready || ina219Ready || bh1750Ready || ds3231Ready;
 
   Serial.printf("[Sensors] %s | V=%.3fV | I=%.4fA | T=%.2f°C | H=%.2f%% | L=%.1flux\n",
     data.timestamp, data.voltage, data.current,
     data.temperature, data.humidity, data.light);
 
-  return true;
+  return data.valid;
+}
+
+// HARDWARE DIAGNOSTICS
+void validateSensorReadings(SensorData &data) {
+  if (bme280Ready && bme280ReadThisCycle) {
+    if (isnan(data.temperature) || isnan(data.humidity)) {
+      Serial.println(F("[ERROR] BME280 returned NaN"));
+      setHardwareStatus("BME280", hardwareStatus.bme280, STATUS_READ_ERROR);
+      data.temperature = 0.0f;
+      data.humidity = 0.0f;
+    } else if (data.temperature < -40.0f || data.temperature > 85.0f ||
+               data.humidity < 0.0f || data.humidity > 100.0f) {
+      Serial.println(F("[ERROR] BME280 returned impossible data"));
+      setHardwareStatus("BME280", hardwareStatus.bme280, STATUS_INVALID_DATA);
+    } else {
+      setHardwareStatus("BME280", hardwareStatus.bme280, STATUS_OK);
+    }
+  }
+
+  if (ina219Ready && ina219ReadThisCycle) {
+    if (isnan(data.voltage) || isnan(data.current)) {
+      Serial.println(F("[ERROR] INA219 returned NaN"));
+      setHardwareStatus("INA219", hardwareStatus.ina219, STATUS_READ_ERROR);
+      data.voltage = 0.0f;
+      data.current = 0.0f;
+    } else if (data.voltage < 0.0f || data.voltage > 32.0f ||
+               data.current < -10.0f || data.current > 10.0f) {
+      Serial.println(F("[ERROR] INA219 returned impossible data"));
+      setHardwareStatus("INA219", hardwareStatus.ina219, STATUS_INVALID_DATA);
+    } else {
+      setHardwareStatus("INA219", hardwareStatus.ina219, STATUS_OK);
+    }
+  }
+
+  if (bh1750Ready && bh1750ReadThisCycle) {
+    if (isnan(data.light)) {
+      Serial.println(F("[ERROR] BH1750 returned NaN"));
+      setHardwareStatus("BH1750", hardwareStatus.bh1750, STATUS_READ_ERROR);
+      data.light = 0.0f;
+    } else if (data.light < 0.0f || data.light > 120000.0f) {
+      Serial.println(F("[ERROR] BH1750 returned impossible light data"));
+      setHardwareStatus("BH1750", hardwareStatus.bh1750, STATUS_INVALID_DATA);
+    } else {
+      setHardwareStatus("BH1750", hardwareStatus.bh1750, STATUS_OK);
+    }
+  }
+}
+
+void updateHardwareStatus() {
+  if (ds3231Ready) {
+    if (rtc.lostPower()) {
+      Serial.println(F("[WARN] DS3231 lost power"));
+      setHardwareStatus("DS3231", hardwareStatus.ds3231, STATUS_DEVICE_SPECIFIC_ERROR);
+    } else if (ds3231ReadThisCycle) {
+      setHardwareStatus("DS3231", hardwareStatus.ds3231, STATUS_OK);
+    }
+  }
+  printHardwareStatus();
+}
+
+void appendHardwareStatus(JsonDocument &doc) {
+  JsonObject status = doc.createNestedObject("hardware_status");
+  status["bme280"] = hardwareStatus.bme280;
+  status["ina219"] = hardwareStatus.ina219;
+  status["bh1750"] = hardwareStatus.bh1750;
+  status["ds3231"] = hardwareStatus.ds3231;
+}
+
+void printHardwareStatus() {
+  Serial.printf("[Diagnostics] Status BME280=%u INA219=%u BH1750=%u DS3231=%u\n",
+    hardwareStatus.bme280, hardwareStatus.ina219,
+    hardwareStatus.bh1750, hardwareStatus.ds3231);
+}
+
+void setHardwareStatus(const char *device, uint8_t &status, uint8_t nextStatus) {
+  if (status != nextStatus) {
+    Serial.printf("[Diagnostics] %s status changed: %u -> %u\n", device, status, nextStatus);
+    status = nextStatus;
+  }
+}
+
+bool isValidRtcTime(const DateTime &time) {
+  return time.year() >= 2020 && time.year() <= 2099 &&
+         time.month() >= 1 && time.month() <= 12 &&
+         time.day() >= 1 && time.day() <= 31 &&
+         time.hour() <= 23 && time.minute() <= 59;
+}
+
+bool isI2CDeviceResponsive(TwoWire &bus, uint8_t address) {
+  bus.beginTransmission(address);
+  return bus.endTransmission() == 0;
 }
 
 
@@ -262,7 +451,8 @@ bool connectMQTT() {
 
 // JSON BUILDER
 String buildJSON(const SensorData &data) {
-  StaticJsonDocument<256> doc;
+  // Nested diagnostics require more room than the original flat payload.
+  StaticJsonDocument<384> doc;
 
   doc["timestamp"]   = data.timestamp;
   doc["voltage"]     = serialized(String(data.voltage, 3));
@@ -270,6 +460,8 @@ String buildJSON(const SensorData &data) {
   doc["temperature"] = serialized(String(data.temperature, 2));
   doc["humidity"]    = serialized(String(data.humidity, 2));
   doc["light"]       = serialized(String(data.light, 1));
+  updateHardwareStatus();
+  appendHardwareStatus(doc);
 
   String payload;
   serializeJson(doc, payload);
