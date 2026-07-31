@@ -82,13 +82,12 @@ export default function MetricCard({
       {trendValue && (
         <div className="mt-3 flex items-center gap-1.5">
           <span
-            className={`text-xs font-medium ${
-              trend === "up"
+            className={`text-xs font-medium ${trend === "up"
                 ? "text-emerald-400"
                 : trend === "down"
-                ? "text-red-400"
-                : "text-slate-400"
-            }`}
+                  ? "text-red-400"
+                  : "text-slate-400"
+              }`}
           >
             {trend === "up" ? "↑" : trend === "down" ? "↓" : "→"} {trendValue}
           </span>

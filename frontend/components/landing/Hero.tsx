@@ -8,7 +8,7 @@ export default function Hero() {
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
       {/* Background Image with Overlay */}
       <div className="absolute inset-0 z-0">
-        <div 
+        <div
           className="absolute inset-0 bg-cover bg-center transition-transform duration-[20000ms] scale-110 hover:scale-100"
           style={{ backgroundImage: "url('/hero-bg.png')" }}
         />
@@ -28,15 +28,15 @@ export default function Hero() {
         </div>
 
         <h1 className="text-5xl md:text-7xl lg:text-8xl font-black text-white mb-6 tracking-tight leading-tight">
-          Protect Your <br/>
+          Protect Your <br />
           <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 via-orange-500 to-amber-500">
             Solar Investment
           </span>
         </h1>
 
         <p className="max-w-2xl mx-auto text-slate-400 text-lg md:text-xl mb-12 leading-relaxed">
-          SolarShield uses advanced Machine Learning to predict faults, monitor efficiency, 
-          and extend the life of your solar assets. Experience real-time IoT insights 
+          SolarShield uses advanced Machine Learning to predict faults, monitor efficiency,
+          and extend the life of your solar assets. Experience real-time IoT insights
           directly from your panels.
         </p>
 
@@ -64,8 +64,8 @@ export default function Hero() {
             { label: "Healthy Panels", value: "24/24", color: "text-blue-400" },
             { label: "Days Saved", value: "142", color: "text-violet-400" },
           ].map((item, i) => (
-            <div 
-              key={i} 
+            <div
+              key={i}
               className="glass-card p-4 text-center animate-fade-in-up"
               style={{ animationDelay: `${i * 100}ms` }}
             >

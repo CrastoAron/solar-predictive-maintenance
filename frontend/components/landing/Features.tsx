@@ -51,14 +51,14 @@ export default function Features() {
           </h2>
           <div className="w-16 h-1 bg-orange-500 mx-auto rounded-full mb-6" />
           <p className="text-slate-400 max-w-2xl mx-auto">
-            Our platform bridges the gap between hardware sensors and cloud-based AI 
+            Our platform bridges the gap between hardware sensors and cloud-based AI
             to provide a complete solution for solar asset management.
           </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {FEATURES.map((feature, i) => (
-            <div 
+            <div
               key={i}
               className="group glass-card p-8 hover:bg-white/[0.05] transition-all duration-300 hover:-translate-y-2 border-white/[0.05]"
             >
