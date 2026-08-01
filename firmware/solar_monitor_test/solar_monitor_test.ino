@@ -61,6 +61,31 @@ enum SimulationState {
   STATE_OVERCURRENT
 };
 
+// The simulator has no physical sensors, but it emits the same diagnostics
+// shape as solar_monitor so backend and frontend integration remains uniform.
+enum HardwareStatusCode : uint8_t {
+  STATUS_OK = 0,
+  STATUS_INITIALIZATION_FAILED = 1,
+  STATUS_DEVICE_NOT_FOUND = 2,
+  STATUS_INVALID_DATA = 3,
+  STATUS_READ_ERROR = 4,
+  STATUS_DEVICE_SPECIFIC_ERROR = 5
+};
+
+struct HardwareStatus {
+  uint8_t bme280;
+  uint8_t ina219;
+  uint8_t bh1750;
+  uint8_t ds3231;
+};
+
+HardwareStatus hardwareStatus = {
+  STATUS_OK,
+  STATUS_OK,
+  STATUS_OK,
+  STATUS_OK
+};
+
 // GLOBAL VARIABLES
 WiFiClient        wifiClient;
 PubSubClient      mqttClient(wifiClient);
@@ -78,6 +103,9 @@ bool getTimestampAndSolarTime(char *timestamp, size_t timestampLen, int &solarHo
 void generateDummyData(SensorData &data);
 bool publishSensorData(const SensorData &data);
 String buildJSON(const SensorData &data);
+void updateHardwareStatus();
+void appendHardwareStatus(JsonDocument &doc);
+void printHardwareStatus();
 
 void setup() {
   Serial.begin(115200);
@@ -347,7 +375,7 @@ void generateDummyData(SensorData &data) {
 // Required by the backend: device_id, timestamp, voltage, current, lux,
 // temperature, and humidity. Values remain JSON numbers (not strings).
 String buildJSON(const SensorData &data) {
-  StaticJsonDocument<256> doc;
+  StaticJsonDocument<384> doc;
 
   doc["device_id"]   = DEVICE_ID;
   doc["timestamp"]   = data.timestamp;
@@ -356,10 +384,37 @@ String buildJSON(const SensorData &data) {
   doc["lux"]         = data.light;
   doc["temperature"] = data.temperature;
   doc["humidity"]    = data.humidity;
+  updateHardwareStatus();
+  appendHardwareStatus(doc);
 
   String payload;
   serializeJson(doc, payload);
   return payload;
+}
+
+// HARDWARE DIAGNOSTICS
+void updateHardwareStatus() {
+  // No physical hardware is read in this sketch. Keep the simulated device
+  // health explicit and refresh the packet before every MQTT publish.
+  hardwareStatus.bme280 = STATUS_OK;
+  hardwareStatus.ina219 = STATUS_OK;
+  hardwareStatus.bh1750 = STATUS_OK;
+  hardwareStatus.ds3231 = STATUS_OK;
+  printHardwareStatus();
+}
+
+void appendHardwareStatus(JsonDocument &doc) {
+  JsonObject status = doc.createNestedObject("hardware_status");
+  status["bme280"] = hardwareStatus.bme280;
+  status["ina219"] = hardwareStatus.ina219;
+  status["bh1750"] = hardwareStatus.bh1750;
+  status["ds3231"] = hardwareStatus.ds3231;
+}
+
+void printHardwareStatus() {
+  Serial.printf("[Diagnostics] Status BME280=%u INA219=%u BH1750=%u DS3231=%u\n",
+    hardwareStatus.bme280, hardwareStatus.ina219,
+    hardwareStatus.bh1750, hardwareStatus.ds3231);
 }
 
 // MQTT PUBLISH (Matching the original format)

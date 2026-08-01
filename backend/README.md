@@ -315,3 +315,64 @@ All endpoints below require:
   - Ensure ML assets exist (`backend/ml_models/*`) or run `scripts/generate_dummy_models.py`
   - Reduce `PREDICTION_BATCH_INTERVAL_SECONDS` for faster local iteration
 
+## Diagnostics module
+
+`backend/diagnostics/` is an independent, deterministic root-cause analysis module. It does not alter MQTT ingestion, InfluxDB storage, the ML pipeline, API routes, or the frontend. It consumes telemetry, historical telemetry, an optional ML prediction, and ESP32 hardware-status values, then returns an explainable diagnostic result.
+
+The module includes rule-based detectors for:
+
+- Sensor Failure
+- Partial Shading
+- Dust Accumulation
+- Panel Degradation
+- Possible Panel Damage
+- Loose Wiring
+
+The ML prediction supplies the overall health label when available; diagnostics rules independently determine the likely cause, evidence, confidence score, severity, and maintenance recommendation.
+
+### Diagnostics requirements
+
+No additional packages are needed beyond `requirements.txt`. The diagnostics package uses Python standard-library dataclasses, enums, and statistics utilities.
+
+### Test diagnostics manually
+
+From the `backend/` directory, activate the virtual environment and open Python:
+
+```bash
+source .venv/bin/activate
+python
+```
+
+```python
+from diagnostics import run_diagnostics
+
+history = [
+    {
+        "voltage": 18.2,
+        "current": 2.0,
+        "power": 36.4,
+        "lux": 50000,
+        "temperature": 30,
+        "humidity": 55,
+    }
+    for _ in range(8)
+]
+
+result = run_diagnostics(
+    latest_telemetry={
+        "voltage": 18.0,
+        "current": 0.1,
+        "power": 1.8,
+        "lux": 52000,
+        "temperature": 31,
+        "humidity": 55,
+    },
+    historical_telemetry=history,
+    ml_prediction={"fault_class": 2, "fault_label": "Fault"},
+    hardware_status={"bme280": 0, "ina219": 0, "bh1750": 0, "ds3231": 0},
+)
+
+print(result.to_dict())
+```
+
+The example should identify `Partial Shading` with evidence and a confidence score. To test sensor diagnostics, set a hardware status to a non-zero value, for example `"bme280": 4`; the primary cause should become `Sensor Failure`.
