@@ -101,14 +101,18 @@ Defaults (relative to `backend/`):
 ### 1) Start dependencies
 
 # 1. Clean up conflicting networks or containers
+```bash
 docker stop mosquitto 2>/dev/null || true
 docker rm mosquitto 2>/dev/null || true
 docker network rm my_mqtt_net 2>/dev/null || true
-
+```
 # 2. Build the exact matching bridge subnet mask
+```bash
 docker network create --subnet=192.168.137.0/24 my_mqtt_net
+```
 
 # 3. Spin up the container with volume mapping and static address allocation
+```bash
 docker run -d \
   --name mosquitto \
   --network my_mqtt_net \
@@ -116,6 +120,7 @@ docker run -d \
   -p 1883:1883 \
   -v \$(pwd)/mosquitto.conf:/mosquitto/config/mosquitto.conf \
   eclipse-mosquitto:2
+```
 
 Start InfluxDB 2.x (example):
 
