@@ -53,3 +53,12 @@ class MaintenanceResponse(BaseModel):
     efficiency_trend: str
     recommendation: str
 
+
+class HardwareStatusResponse(BaseModel):
+    device_id: str
+    timestamp: str
+    bme280: int
+    ina219: int
+    bh1750: int
+    ds3231: int
+

@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import CORS_ORIGINS
 from routers.alerts import router as alerts_router
 from routers.history import router as history_router
+from routers.hardware_status import router as hardware_status_router
 from routers.live import router as live_router
 from routers.maintenance import router as maintenance_router
 from routers.predictions import router as predictions_router
@@ -57,6 +58,7 @@ app.add_middleware(
 
 app.include_router(live_router)
 app.include_router(history_router)
+app.include_router(hardware_status_router)
 app.include_router(predictions_router)
 app.include_router(alerts_router)
 app.include_router(maintenance_router)

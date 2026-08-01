@@ -113,6 +113,10 @@ class InfluxClient:
         lux: float,
         temperature: float,
         humidity: float,
+        bme280_status: int | None = None,
+        ina219_status: int | None = None,
+        bh1750_status: int | None = None,
+        ds3231_status: int | None = None,
     ) -> None:
         # The requirement says: on receive validate + skip invalid/null points.
         # So we enforce non-null numeric values here too.
@@ -138,8 +142,18 @@ class InfluxClient:
             .field("lux", float(lux))
             .field("temperature", float(temperature))
             .field("humidity", float(humidity))
-            .time(dt, WritePrecision.NS)
         )
+
+        if bme280_status is not None:
+            point = point.field("bme280_status", int(bme280_status))
+        if ina219_status is not None:
+            point = point.field("ina219_status", int(ina219_status))
+        if bh1750_status is not None:
+            point = point.field("bh1750_status", int(bh1750_status))
+        if ds3231_status is not None:
+            point = point.field("ds3231_status", int(ds3231_status))
+
+        point = point.time(dt, WritePrecision.NS)
 
         self._write_api.write(bucket=INFLUX_BUCKET_RAW, record=point)
 
@@ -236,6 +250,39 @@ from(bucket: "{INFLUX_BUCKET_RAW}")
             "lux": float(row["lux"]),
             "temperature": float(row["temperature"]),
             "humidity": float(row["humidity"]),
+        }
+
+    def get_latest_hardware_status(self, device_id: str) -> dict[str, Any] | None:
+        query = f"""
+from(bucket: "{INFLUX_BUCKET_RAW}")
+  |> range(start: -{INFLUX_LATEST_LOOKBACK})
+  |> filter(fn: (r) => r._measurement == "sensor_data" and r.device_id == "{device_id}")
+  |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+  |> keep(columns: ["_time","bme280_status","ina219_status","bh1750_status","ds3231_status"])
+  |> sort(columns: ["_time"], desc: true)
+  |> limit(n: 1)
+"""
+        row = self._query_single_row(query)
+        if not row:
+            return None
+
+        required_keys = ["bme280_status", "ina219_status", "bh1750_status", "ds3231_status"]
+        if any(_row_get(row, k) is None for k in required_keys):
+            return None
+
+        dt = row.get("_time")
+        if isinstance(dt, datetime):
+            timestamp = _utc_iso_z(dt)
+        else:
+            timestamp = _utc_iso_z(_parse_utc_timestamp(str(dt)))
+
+        return {
+            "device_id": device_id,
+            "timestamp": timestamp,
+            "bme280": int(row["bme280_status"]),
+            "ina219": int(row["ina219_status"]),
+            "bh1750": int(row["bh1750_status"]),
+            "ds3231": int(row["ds3231_status"]),
         }
 
     def get_raw_data_last_minutes(

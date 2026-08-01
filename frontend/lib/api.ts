@@ -54,7 +54,14 @@ export interface MaintenanceData {
   efficiency_trend: "improving" | "stable" | "declining";
   recommendation: string;
 }
-
+export interface HardwareStatusData {
+  device_id: string;
+  timestamp: string;
+  bme280: number;
+  ina219: number;
+  bh1750: number;
+  ds3231: number;
+}
 // ── Core fetch helper ─────────────────────────────────────────────────────
 
 async function apiFetch<T>(path: string): Promise<T> {
@@ -126,3 +133,6 @@ export const getAlerts = () =>
 
 export const getMaintenance = () =>
   apiFetch<MaintenanceData | null>("/api/maintenance");
+
+export const getHardwareStatus = () =>
+  apiFetch<HardwareStatusData | null>("/api/hardware-status");

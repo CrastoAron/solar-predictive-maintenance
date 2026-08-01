@@ -5,7 +5,8 @@ ML-driven predictive maintenance and efficiency analysis backend for solar panel
 ## What this backend does
 
 - **Ingests live sensor readings** via MQTT and stores them in **InfluxDB 2.x**
-- **Serves REST APIs** for live values, history charts, predictions, alerts, and maintenance guidance
+- **Captures optional hardware diagnostics** from MQTT payloads and stores them alongside sensor readings
+- **Serves REST APIs** for live values, history charts, predictions, alerts, hardware diagnostics, and maintenance guidance
 - **Runs a background scheduler** that periodically:
   - pulls last ~30 minutes of sensor data from InfluxDB
   - computes features
@@ -99,11 +100,22 @@ Defaults (relative to `backend/`):
 
 ### 1) Start dependencies
 
-Start an MQTT broker (example with Mosquitto):
+# 1. Clean up conflicting networks or containers
+docker stop mosquitto 2>/dev/null || true
+docker rm mosquitto 2>/dev/null || true
+docker network rm my_mqtt_net 2>/dev/null || true
 
-```bash
-docker run -d --name mosquitto -p 1883:1883 eclipse-mosquitto:2
-```
+# 2. Build the exact matching bridge subnet mask
+docker network create --subnet=192.168.137.0/24 my_mqtt_net
+
+# 3. Spin up the container with volume mapping and static address allocation
+docker run -d \
+  --name mosquitto \
+  --network my_mqtt_net \
+  --ip 192.168.137.50 \
+  -p 1883:1883 \
+  -v \$(pwd)/mosquitto.conf:/mosquitto/config/mosquitto.conf \
+  eclipse-mosquitto:2
 
 Start InfluxDB 2.x (example):
 
@@ -170,6 +182,14 @@ curl http://localhost:8000/health
 If you don’t have ESP32 hardware connected yet, you can publish simulated sensor readings to MQTT.
 The backend will ingest them into InfluxDB, the frontend will update live metrics, and the scheduler can generate predictions/alerts.
 
+Run interactively with prompts:
+
+```bash
+cd backend
+source .venv/bin/activate
+python3 scripts/simulate_sensor.py
+```
+
 Run (mixed normal/degraded/fault samples):
 
 ```bash
@@ -196,6 +216,18 @@ Send a fixed number of messages then exit:
 python3 scripts/simulate_sensor.py --count 50
 ```
 
+Override a specific sensor value for every payload:
+
+```bash
+python3 scripts/simulate_sensor.py --override-sensor lux --override-value 7500
+```
+
+Include optional hardware diagnostics in the payload:
+
+```bash
+python3 scripts/simulate_sensor.py --hardware-status 0 0 0 5
+```
+
 ## Data ingestion contract (MQTT payload)
 
 The MQTT subscriber expects JSON payloads on `MQTT_TOPIC` with fields:
@@ -207,6 +239,10 @@ The MQTT subscriber expects JSON payloads on `MQTT_TOPIC` with fields:
 - `lux` (number)
 - `temperature` (number)
 - `humidity` (number)
+- `hardware_status` (optional object): numeric status codes for diagnostics
+  - `bme280`, `ina219`, `bh1750`, `ds3231` (each integer 0-5)
+
+> Important: firmware must send `lux` not `light`, and must include `device_id`.
 
 Power is computed as `power = voltage * current` before writing to InfluxDB.
 
@@ -257,6 +293,8 @@ All endpoints below require:
   - returns latest prediction (or `null` if none)
 - `GET /api/alerts?device_id=...`
   - returns latest alerts list (may be empty)
+- `GET /api/hardware-status?device_id=...`
+  - returns the latest device diagnostics snapshot with `bme280`, `ina219`, `bh1750`, and `ds3231`
 - `GET /api/maintenance?device_id=...`
   - derived view based on latest prediction + efficiency trend
 

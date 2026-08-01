@@ -34,6 +34,31 @@ def _parse_esp32_timestamp_to_utc_iso_z(value: str) -> str:
     return dt_utc.isoformat().replace("+00:00", "Z")
 
 
+def _parse_hardware_status(payload: dict[str, Any]) -> dict[str, int] | None:
+    status = payload.get("hardware_status")
+    if status is None:
+        return None
+    if not isinstance(status, dict):
+        raise ValueError("hardware_status must be an object")
+
+    result: dict[str, int] = {}
+    for key in ("bme280", "ina219", "bh1750", "ds3231"):
+        if key not in status or status[key] is None:
+            raise ValueError(f"hardware_status.{key} is required")
+        value = status[key]
+        if isinstance(value, bool):
+            raise ValueError(f"hardware_status.{key} must be an integer")
+        try:
+            value_int = int(value)
+        except Exception:
+            raise ValueError(f"hardware_status.{key} must be an integer")
+        if value_int < 0 or value_int > 5:
+            raise ValueError(f"hardware_status.{key} must be in 0..5")
+        result[key] = value_int
+
+    return result
+
+
 class MQTTSubscriber:
     def __init__(
         self,
@@ -98,6 +123,7 @@ class MQTTSubscriber:
             lux = float(payload["lux"])
             temperature = float(payload["temperature"])
             humidity = float(payload["humidity"])
+            hardware_status = _parse_hardware_status(payload)
         except Exception:
             # Handle missing/null sensor values gracefully by skipping invalid points.
             return
@@ -113,5 +139,9 @@ class MQTTSubscriber:
             lux=lux,
             temperature=temperature,
             humidity=humidity,
+            bme280_status=hardware_status.get("bme280") if hardware_status else None,
+            ina219_status=hardware_status.get("ina219") if hardware_status else None,
+            bh1750_status=hardware_status.get("bh1750") if hardware_status else None,
+            ds3231_status=hardware_status.get("ds3231") if hardware_status else None,
         )
 
