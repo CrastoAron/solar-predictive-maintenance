@@ -1,9 +1,11 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import CORS_ORIGINS
+from dependencies import get_current_user
+from routers.admin import router as admin_router
 from routers.alerts import router as alerts_router
 from routers.diagnostics import router as diagnostics_router
 from routers.history import router as history_router
@@ -64,6 +66,15 @@ app.include_router(predictions_router)
 app.include_router(alerts_router)
 app.include_router(maintenance_router)
 app.include_router(diagnostics_router)
+app.include_router(admin_router)
+
+
+@app.get("/auth/me")
+async def auth_me(user: dict = Depends(get_current_user)) -> dict[str, str | None]:
+    return {
+        "uid": user.get("uid"),
+        "role": (user.get("role") or "customer").lower(),
+    }
 
 
 @app.get("/health")

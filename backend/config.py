@@ -43,6 +43,11 @@ FIREBASE_SERVICE_ACCOUNT_PATH: str = _getenv(
     "FIREBASE_SERVICE_ACCOUNT_PATH", "serviceAccountKey.json"
 ) or "serviceAccountKey.json"
 
+# Supabase / structural metadata storage
+SUPABASE_URL: str | None = _getenv("SUPABASE_URL")
+SUPABASE_ANON_KEY: str | None = _getenv("SUPABASE_ANON_KEY")
+SUPABASE_SERVICE_ROLE_KEY: str | None = _getenv("SUPABASE_SERVICE_ROLE_KEY")
+
 
 # CORS (Next.js dev)
 try:

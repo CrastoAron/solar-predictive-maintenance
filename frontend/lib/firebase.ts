@@ -14,5 +14,5 @@ const app =
     ? initializeApp(firebaseConfig)
     : getApps()[0];
 
-export const auth = app ? getAuth(app) : (null as any);
+export const auth = app ? getAuth(app) : null;
 export const googleProvider = new GoogleAuthProvider();

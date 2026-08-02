@@ -79,7 +79,8 @@ export interface DiagnosticResult {
 
 async function apiFetch<T>(path: string): Promise<T> {
   try {
-    const token = await auth.currentUser?.getIdToken();
+    const currentAuth = auth;
+    const token = currentAuth ? await currentAuth.currentUser?.getIdToken() : null;
     if (!token) throw new Error("No auth token");
 
     const res = await fetch(API_BASE + path, {
@@ -90,7 +91,7 @@ async function apiFetch<T>(path: string): Promise<T> {
     });
 
     if (res.status === 401) {
-      await signOut(auth);
+      if (currentAuth) await signOut(currentAuth);
       if (typeof window !== "undefined") window.location.href = "/login";
       throw new Error("Unauthorized");
     }

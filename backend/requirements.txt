@@ -11,6 +11,8 @@ xgboost
 joblib
 python-dotenv
 pydantic
+supabase
+pytest
 
 # Diagnostics module: no additional third-party dependency is required.
 # It uses the Python standard library and the packages listed above.

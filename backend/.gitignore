@@ -5,6 +5,7 @@ venv/
 # --- Env / secrets ---
 .env
 .env.*
+!.env.example
 serviceAccountKey.json
 
 # --- Generated ML assets (local/dev) ---
