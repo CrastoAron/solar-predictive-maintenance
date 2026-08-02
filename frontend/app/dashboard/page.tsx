@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useAppContext } from "@/lib/app-context";
 import { useToast } from "@/lib/toast-context";
-import { getLive, getPredictions, getHistory, getHardwareStatus, LiveData, PredictionData, HardwareStatusData } from "@/lib/api";
+import { getLive, getPredictions, getHistory, getHardwareStatus, getDiagnostics, LiveData, PredictionData, HardwareStatusData, DiagnosticResult } from "@/lib/api";
 import NavSidebar from "@/components/ui/NavSidebar";
 import MetricCard from "@/components/ui/MetricCard";
 import StatusBadge from "@/components/ui/StatusBadge";
@@ -46,7 +46,8 @@ export default function DashboardPage() {
 
   const [live, setLive] = useState<LiveData | null>(null);
   const [predictions, setPredictions] = useState<PredictionData | null>(null);
-  const [diagnostics, setDiagnostics] = useState<HardwareStatusData | null>(null);
+  const [hardwareStatus, setHardwareStatus] = useState<HardwareStatusData | null>(null);
+  const [diagnostics, setDiagnostics] = useState<DiagnosticResult | null>(null);
   const [chartData, setChartData] = useState<{ timestamp: string; value: number }[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -54,6 +55,7 @@ export default function DashboardPage() {
 
   const intervalRef     = useRef<ReturnType<typeof setInterval> | null>(null);
   const predIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hardwareIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const diagIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Redirect if not authed
@@ -94,9 +96,19 @@ export default function DashboardPage() {
     }
   }, []);
 
-  const fetchDiagnostics = useCallback(async () => {
+  const fetchHardwareStatus = useCallback(async () => {
     try {
       const data = await getHardwareStatus();
+      setHardwareStatus(data);
+    } catch (e) {
+      console.error(e);
+      setHardwareStatus(null);
+    }
+  }, []);
+
+  const fetchDiagnostics = useCallback(async () => {
+    try {
+      const data = await getDiagnostics();
       setDiagnostics(data);
     } catch (e) {
       console.error(e);
@@ -106,14 +118,16 @@ export default function DashboardPage() {
 
   // Start / stop intervals
   const startPolling = useCallback(() => {
-    if (!intervalRef.current)     intervalRef.current     = setInterval(fetchLive, LIVE_POLL_MS);
-    if (!predIntervalRef.current) predIntervalRef.current = setInterval(fetchPredictions, PRED_POLL_MS);
-    if (!diagIntervalRef.current) diagIntervalRef.current = setInterval(fetchDiagnostics, DIAGNOSTICS_POLL_MS);
-  }, [fetchLive, fetchPredictions, fetchDiagnostics]);
+    if (!intervalRef.current)        intervalRef.current        = setInterval(fetchLive, LIVE_POLL_MS);
+    if (!predIntervalRef.current)    predIntervalRef.current    = setInterval(fetchPredictions, PRED_POLL_MS);
+    if (!hardwareIntervalRef.current) hardwareIntervalRef.current = setInterval(fetchHardwareStatus, LIVE_POLL_MS);
+    if (!diagIntervalRef.current)    diagIntervalRef.current    = setInterval(fetchDiagnostics, DIAGNOSTICS_POLL_MS);
+  }, [fetchLive, fetchPredictions, fetchHardwareStatus, fetchDiagnostics]);
 
   const stopPolling = useCallback(() => {
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
     if (predIntervalRef.current) { clearInterval(predIntervalRef.current); predIntervalRef.current = null; }
+    if (hardwareIntervalRef.current) { clearInterval(hardwareIntervalRef.current); hardwareIntervalRef.current = null; }
     if (diagIntervalRef.current) { clearInterval(diagIntervalRef.current); diagIntervalRef.current = null; }
   }, []);
 
@@ -124,6 +138,7 @@ export default function DashboardPage() {
     setConnectionStatus("connecting");
     fetchLive();
     fetchPredictions();
+    fetchHardwareStatus();
     fetchDiagnostics();
 
     // Seed chart with last hour of history
@@ -147,6 +162,7 @@ export default function DashboardPage() {
       } else {
         fetchLive();
         fetchPredictions();
+        fetchHardwareStatus();
         fetchDiagnostics();
         startPolling();
       }
@@ -154,12 +170,13 @@ export default function DashboardPage() {
 
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
-  }, [user, fetchLive, fetchPredictions, fetchDiagnostics, startPolling, stopPolling]);
+  }, [user, fetchLive, fetchPredictions, fetchHardwareStatus, fetchDiagnostics, startPolling, stopPolling]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
     await fetchLive();
     await fetchPredictions();
+    await fetchHardwareStatus();
     await fetchDiagnostics();
     setRefreshing(false);
     addToast("success", "Dashboard refreshed successfully.");
@@ -271,10 +288,10 @@ export default function DashboardPage() {
                   <p className="text-sm text-slate-500 uppercase tracking-widest mb-4">Hardware Diagnostics</p>
                   <div className="space-y-3">
                     {[
-                      { label: "BME280", value: diagnostics?.bme280 },
-                      { label: "INA219", value: diagnostics?.ina219 },
-                      { label: "BH1750", value: diagnostics?.bh1750 },
-                      { label: "DS3231", value: diagnostics?.ds3231 },
+                      { label: "BME280", value: hardwareStatus?.bme280 },
+                      { label: "INA219", value: hardwareStatus?.ina219 },
+                      { label: "BH1750", value: hardwareStatus?.bh1750 },
+                      { label: "DS3231", value: hardwareStatus?.ds3231 },
                     ].map(({ label, value }) => {
                       const statusLabel = value !== undefined && value !== null ? STATUS_LABELS[value] : "—";
                       const statusClass = value !== undefined && value !== null ? STATUS_CLASSES[value] : "text-slate-400";
@@ -288,8 +305,43 @@ export default function DashboardPage() {
                       );
                     })}
                     <div className="pt-3 text-xs text-slate-500">
-                      Updated {diagnostics ? new Date(diagnostics.timestamp).toLocaleTimeString() : "—"}
+                      Updated {hardwareStatus ? new Date(hardwareStatus.timestamp).toLocaleTimeString() : "—"}
                     </div>
+                  </div>
+                </div>
+                <div className="glass-card p-5">
+                  <p className="text-sm text-slate-500 uppercase tracking-widest mb-4">Diagnostics Summary</p>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 text-base">System Health</span>
+                      <span className="text-white text-base font-semibold">{diagnostics?.health ?? "—"}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 text-base">Likely Cause</span>
+                      <span className="text-white text-base font-semibold">{diagnostics?.root_cause ?? "—"}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 text-base">Confidence</span>
+                      <span className="text-white text-base font-semibold">{diagnostics ? `${diagnostics.confidence}%` : "—"}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 text-base">Severity</span>
+                      <span className="text-white text-base font-semibold">{diagnostics?.severity ?? "—"}</span>
+                    </div>
+                    <div className="pt-3 text-slate-300 text-sm">
+                      <p className="font-semibold text-slate-400">Recommendation</p>
+                      <p>{diagnostics?.recommendation ?? "—"}</p>
+                    </div>
+                    {diagnostics?.evidence && diagnostics.evidence.length > 0 ? (
+                      <div className="pt-3 text-slate-300 text-sm">
+                        <p className="font-semibold text-slate-400">Evidence</p>
+                        <ul className="list-disc list-inside space-y-1 mt-2 text-slate-300">
+                          {diagnostics.evidence.map((item, index) => (
+                            <li key={index}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </div>
