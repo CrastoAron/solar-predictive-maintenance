@@ -15,6 +15,7 @@ from config import (
 from services.feature_eng import compute_features
 from services.influx_client import InfluxClient
 from services.ml_runner import MLRunner
+from diagnostics import run_diagnostics
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +90,36 @@ class PredictionScheduler:
             fault_class = int(prediction["fault_class"])
             efficiency_score = float(prediction["efficiency_score"])
             if fault_class >= FAULT_ALERT_MIN_CLASS or efficiency_score < EFFICIENCY_ALERT_MAX_SCORE:
+                # Run diagnostics to attach evidence/recommendation to the alert.
+                diagnostics_obj = None
+                try:
+                    latest_sensor = self._influx.get_latest_sensor(device_id=device_id) or {}
+                    recent_df = df
+                    recent_sensor_history = [
+                        {
+                            "timestamp": row["timestamp"].isoformat().replace("+00:00", "Z")
+                            if hasattr(row["timestamp"], "isoformat")
+                            else row["timestamp"],
+                            "voltage": row["voltage"],
+                            "current": row["current"],
+                            "power": row["power"],
+                            "lux": row["lux"],
+                            "temperature": row["temperature"],
+                            "humidity": row["humidity"],
+                        }
+                        for _, row in recent_df.iterrows()
+                    ]
+                    latest_hw = self._influx.get_latest_hardware_status(device_id)
+                    diagnostics = run_diagnostics(
+                        latest_telemetry=latest_sensor,
+                        historical_telemetry=recent_sensor_history,
+                        ml_prediction=prediction,
+                        hardware_status=latest_hw,
+                    )
+                    diagnostics_obj = diagnostics.to_dict() if diagnostics is not None else None
+                except Exception:
+                    diagnostics_obj = None
+
                 self._influx.write_alert(
                     device_id=device_id,
                     alert_type="fault",
@@ -96,6 +127,7 @@ class PredictionScheduler:
                     message=_alert_message(prediction),
                     resolved=False,
                     timestamp=now_utc,
+                    diagnostics=diagnostics_obj,
                 )
         except Exception:
             logger.exception("Prediction batch failed.")

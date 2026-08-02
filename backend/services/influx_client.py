@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+import json
 
 import pandas as pd
 from influxdb_client import InfluxDBClient, Point, WritePrecision
@@ -187,6 +188,7 @@ class InfluxClient:
         message: str,
         resolved: bool = False,
         timestamp: datetime | None = None,
+        diagnostics: dict[str, Any] | None = None,
     ) -> None:
         event_time = (timestamp or datetime.now(timezone.utc)).astimezone(timezone.utc)
         point = (
@@ -198,6 +200,12 @@ class InfluxClient:
             .field("resolved", bool(resolved))
             .time(event_time, WritePrecision.NS)
         )
+        if diagnostics is not None:
+            try:
+                point = point.field("diagnostics", json.dumps(diagnostics))
+            except Exception:
+                # If diagnostics cannot be serialized, store a string summary.
+                point = point.field("diagnostics", str(diagnostics))
         self._write_api.write(bucket=INFLUX_BUCKET_ALERTS, record=point)
 
     def _query_single_row(self, query: str) -> dict[str, Any] | None:
@@ -392,9 +400,9 @@ from(bucket: "{INFLUX_BUCKET_PREDICTIONS}")
 from(bucket: "{INFLUX_BUCKET_ALERTS}")
   |> range(start: -{INFLUX_LATEST_LOOKBACK})
   |> filter(fn: (r) => r._measurement == "alert_event" and r.device_id == "{device_id}")
-  |> filter(fn: (r) => r._field == "message" or r._field == "resolved")
+  |> filter(fn: (r) => r._field == "message" or r._field == "resolved" or r._field == "diagnostics")
   |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
-  |> keep(columns: ["_time","type","severity","message","resolved"])
+  |> keep(columns: ["_time","type","severity","message","resolved","diagnostics"])
   |> sort(columns: ["_time"], desc: true)
   |> limit(n: {limit})
 """
@@ -412,12 +420,23 @@ from(bucket: "{INFLUX_BUCKET_ALERTS}")
             resolved = row.get("resolved")
             type_ = row.get("type")
             severity = row.get("severity")
+            diagnostics_raw = row.get("diagnostics")
 
             # Message/resolved are the minimal required fields.
             if message is None or resolved is None:
                 continue
 
             resolved_bool = bool(resolved)
+
+            diag_obj = None
+            if diagnostics_raw is not None:
+                try:
+                    if isinstance(diagnostics_raw, str):
+                        diag_obj = json.loads(diagnostics_raw)
+                    else:
+                        diag_obj = diagnostics_raw
+                except Exception:
+                    diag_obj = str(diagnostics_raw)
 
             out.append(
                 {
@@ -427,6 +446,7 @@ from(bucket: "{INFLUX_BUCKET_ALERTS}")
                     "message": str(message),
                     "timestamp": _utc_iso_z(dt),
                     "resolved": resolved_bool,
+                    "diagnostics": diag_obj,
                 }
             )
         return out

@@ -52,6 +52,9 @@ class MaintenanceResponse(BaseModel):
     next_service_date: Optional[str]
     efficiency_trend: str
     recommendation: str
+    when_to_clean: Optional[str] = None
+    panel_damaged: Optional[bool] = None
+    panel_health: Optional[str] = None
 
 
 class HardwareStatusResponse(BaseModel):
@@ -61,4 +64,13 @@ class HardwareStatusResponse(BaseModel):
     ina219: int
     bh1750: int
     ds3231: int
+
+
+class DiagnosticsResponse(BaseModel):
+    health: str
+    root_cause: str
+    confidence: int
+    severity: str
+    evidence: list[str]
+    recommendation: str
 
