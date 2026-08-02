@@ -1,9 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { Sun } from "lucide-react";
+import { Link, Sun } from "lucide-react";
 
 function AdminLoginForm({ onSubmit, loading, error }: { onSubmit: (email: string, password: string) => Promise<void>; loading: boolean; error: string }) {
   const [email, setEmail] = useState("");
@@ -93,10 +92,12 @@ export default function LoginPage() {
           backgroundSize: "32px 32px",
         }}
       />
-
       {/* Card */}
       <div className="relative z-10 w-full max-w-md mx-4">
         <div className="glass-card p-10 flex flex-col items-center text-center shadow-2xl">
+          <div className="absolute top-4 right-4 bg-orange-500/20 hover:bg-orange-500/30 px-4 py-2 rounded-xl text-white font-semibold text-sm transition-colors">
+            <a href="/">Back to homepage</a>
+          </div>
           {/* Logo */}
           <div className="w-16 h-16 rounded-2xl bg-orange-500 flex items-center justify-center shadow-xl shadow-orange-500/40 mb-6">
             <Sun className="w-9 h-9 text-white" />

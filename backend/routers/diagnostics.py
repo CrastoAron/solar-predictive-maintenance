@@ -4,6 +4,7 @@ from config import DEFAULT_DEVICE_ID
 from dependencies import get_current_user
 from diagnostics import run_diagnostics
 from models.schemas import DiagnosticsResponse
+from services.admin_store import admin_store
 from services.influx_client import get_influx_client
 
 router = APIRouter()
@@ -35,11 +36,13 @@ async def get_diagnostics(
 
     latest_prediction = influx.get_latest_prediction(device_id)
     latest_hardware_status = influx.get_latest_hardware_status(device_id)
+    panel_config = admin_store.get_panel_by_device_id(device_id)
 
     result = run_diagnostics(
         latest_telemetry=latest_sensor,
         historical_telemetry=recent_sensor_history,
         ml_prediction=latest_prediction,
         hardware_status=latest_hardware_status,
+        panel_config=panel_config,
     )
     return result.to_dict()

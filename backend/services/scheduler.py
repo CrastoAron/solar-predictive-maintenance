@@ -16,6 +16,7 @@ from services.feature_eng import compute_features
 from services.influx_client import InfluxClient
 from services.ml_runner import MLRunner
 from diagnostics import run_diagnostics
+from services.admin_store import admin_store
 
 logger = logging.getLogger(__name__)
 
@@ -110,11 +111,13 @@ class PredictionScheduler:
                         for _, row in recent_df.iterrows()
                     ]
                     latest_hw = self._influx.get_latest_hardware_status(device_id)
+                    panel_config = admin_store.get_panel_by_device_id(device_id)
                     diagnostics = run_diagnostics(
                         latest_telemetry=latest_sensor,
                         historical_telemetry=recent_sensor_history,
                         ml_prediction=prediction,
                         hardware_status=latest_hw,
+                        panel_config=panel_config,
                     )
                     diagnostics_obj = diagnostics.to_dict() if diagnostics is not None else None
                 except Exception:
@@ -148,4 +151,3 @@ def get_prediction_scheduler(
             ml_runner=ml_runner,
         )
     return _prediction_scheduler
-

@@ -8,6 +8,7 @@ from config import DEFAULT_DEVICE_ID, EFFICIENCY_ALERT_MAX_SCORE, FAULT_ALERT_MI
 from dependencies import get_current_user
 from models.schemas import MaintenanceResponse
 from diagnostics import run_diagnostics
+from services.admin_store import admin_store
 from services.influx_client import get_influx_client
 
 router = APIRouter()
@@ -52,12 +53,14 @@ async def get_maintenance(
     ]
 
     latest_hardware_status = influx.get_latest_hardware_status(device_id)
+    panel_config = admin_store.get_panel_by_device_id(device_id)
     try:
         diagnostics = run_diagnostics(
             latest_telemetry=latest_sensor or {},
             historical_telemetry=recent_sensor_history,
             ml_prediction=latest,
             hardware_status=latest_hardware_status,
+            panel_config=panel_config,
         )
     except Exception:
         diagnostics = None
@@ -164,12 +167,14 @@ async def debug_get_maintenance(device_id: str = Query(default=DEFAULT_DEVICE_ID
         for _, row in recent_sensor_history_df.iterrows()
     ]
     latest_hardware_status = influx.get_latest_hardware_status(device_id)
+    panel_config = admin_store.get_panel_by_device_id(device_id)
     try:
         diagnostics = run_diagnostics(
             latest_telemetry=latest_sensor or {},
             historical_telemetry=recent_sensor_history,
             ml_prediction=latest,
             hardware_status=latest_hardware_status,
+            panel_config=panel_config,
         )
     except Exception:
         diagnostics = None
@@ -203,4 +208,3 @@ async def debug_get_maintenance(device_id: str = Query(default=DEFAULT_DEVICE_ID
         panel_damaged=panel_damaged,
         panel_health=panel_health,
     )
-

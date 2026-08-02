@@ -140,7 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     router.replace("/dashboard");
   };
 
-  const signInWithEmail = async (email: string, password: string, _targetRole: "admin" | "customer" = "customer") => {
+  const signInWithEmail = async (email: string, password: string, targetRole: "admin" | "customer" = "customer") => {
     if (!auth) {
       throw new Error("Firebase is not initialized.");
     }
@@ -155,9 +155,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
     });
 
-    setRole("admin");
-    persistRedirectTarget("admin");
-    router.replace("/admin/dashboard");
+    const nextRole = targetRole === "admin" ? "admin" : "customer";
+    setRole(nextRole);
+    persistRedirectTarget(nextRole);
+    router.replace(nextRole === "admin" ? "/admin/dashboard" : "/dashboard");
   };
 
   const signOut = async () => {

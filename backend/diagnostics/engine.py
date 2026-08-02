@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Mapping
+
 from diagnostics.analyzer import DiagnosticsAnalyzer
 from diagnostics.confidence import choose_best, score_candidate
 from diagnostics.constants import HEALTH_LABELS
@@ -15,6 +17,7 @@ from diagnostics.models import (
     Telemetry,
     TelemetryInput,
 )
+from diagnostics.panel_health import evaluate_panel_health
 from diagnostics.recommendations import recommendation_for
 from diagnostics.rules import DiagnosticContext
 
@@ -39,6 +42,20 @@ def _health_from_prediction_or_severity(prediction: MLPrediction, severity: str)
     return "Fault" if severity == "High" else "Degraded"
 
 
+def _health_for_panel(
+    latest: Telemetry, panel_config: Mapping[str, Any] | None, fallback: str
+) -> str:
+    """Use saved ratings only when the configured panel has a complete rating."""
+    if not panel_config:
+        return fallback
+    try:
+        if float(panel_config.get("rated_voltage")) <= 0 or float(panel_config.get("rated_current")) <= 0:
+            return fallback
+    except (TypeError, ValueError):
+        return fallback
+    return evaluate_panel_health(latest.__dict__, panel_config)
+
+
 class DiagnosticsEngine:
     """Run deterministic root-cause analysis without side effects or service dependencies."""
 
@@ -51,6 +68,7 @@ class DiagnosticsEngine:
         historical_telemetry: HistoryInput = (),
         ml_prediction: PredictionInput = None,
         hardware_status: HardwareStatusInput = None,
+        panel_config: Mapping[str, Any] | None = None,
     ) -> DiagnosticResult:
         latest = _telemetry(latest_telemetry)
         history = tuple(_telemetry(row) for row in historical_telemetry)
@@ -59,7 +77,11 @@ class DiagnosticsEngine:
         candidate = choose_best(self._analyzer.analyze(context))
 
         if candidate is None:
-            health = prediction.fault_label or HEALTH_LABELS.get(prediction.fault_class, "Unknown")
+            health = _health_for_panel(
+                latest,
+                panel_config,
+                prediction.fault_label or HEALTH_LABELS.get(prediction.fault_class, "Unknown"),
+            )
             return DiagnosticResult(
                 health=health,
                 root_cause="No Fault Detected",
@@ -70,7 +92,11 @@ class DiagnosticsEngine:
 
         # ML contributes the health label only. Rule evaluation and confidence
         # remain deterministic and independent of ML output.
-        health = _health_from_prediction_or_severity(prediction, candidate.severity)
+        health = _health_for_panel(
+            latest,
+            panel_config,
+            _health_from_prediction_or_severity(prediction, candidate.severity),
+        )
         return DiagnosticResult(
             health=health,
             root_cause=candidate.cause,
@@ -86,6 +112,7 @@ def run_diagnostics(
     historical_telemetry: HistoryInput = (),
     ml_prediction: PredictionInput = None,
     hardware_status: HardwareStatusInput = None,
+    panel_config: Mapping[str, Any] | None = None,
 ) -> DiagnosticResult:
     """Convenience function for callers that do not need to retain an engine instance."""
     return DiagnosticsEngine().diagnose(
@@ -93,4 +120,5 @@ def run_diagnostics(
         historical_telemetry,
         ml_prediction,
         hardware_status,
+        panel_config,
     )

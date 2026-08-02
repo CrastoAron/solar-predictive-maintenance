@@ -57,6 +57,37 @@ pip install -r requirements.txt
 
 ## Configuration (environment variables)
 
+### Supabase admin configuration
+
+The admin customer and panel editor persists to Supabase; it is not a frontend-only store.
+
+1. In Supabase, open the target project and choose **SQL Editor**.
+2. Open [`supabase/schema.sql`](supabase/schema.sql) in this repository, copy its contents,
+   and run it in the SQL Editor. It creates `customers`, `panel_arrays`, and `panels`, plus
+   their relationships, indexes, and RLS configuration.
+3. In **Project Settings → API**, copy the project URL and the **service_role** secret key.
+   Do not use the `anon`/publishable key for the backend admin store.
+4. Set these values in `backend/.env` and restart the backend process:
+
+   ```env
+   SUPABASE_URL=https://your-project-ref.supabase.co
+   SUPABASE_SERVICE_ROLE_KEY=your-service-role-secret
+   ```
+
+`SUPABASE_SERVICE_ROLE_KEY` is server-only—never expose it through `NEXT_PUBLIC_*` values,
+place it in frontend code, or commit it to the repository. The service-role key bypasses the
+RLS policies used to protect browser clients.
+
+Troubleshooting:
+
+- `PGRST205: Could not find the table public.customers`: step 2 was not applied to this
+  Supabase project. Run `supabase/schema.sql` in its SQL Editor.
+- `new row violates row-level security policy`: the backend is using an anon/publishable key.
+  Replace `SUPABASE_SERVICE_ROLE_KEY` with the actual **service_role** key and restart the
+  backend. Do not copy the anon key into both variables.
+- The backend deliberately returns database errors when Supabase is configured but broken;
+  it does not write temporary in-memory customer or panel records in that case.
+
 The backend uses `python-dotenv` to load environment variables. You can export them in your shell or put them in `backend/.env`.
 
 ### InfluxDB (required)
