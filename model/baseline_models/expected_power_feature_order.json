@@ -1,0 +1,9 @@
+{
+  "feature_order": [
+    "lux",
+    "temperature",
+    "humidity",
+    "hour_sin",
+    "hour_cos"
+  ]
+}

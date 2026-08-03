@@ -81,3 +81,21 @@ RF_MODEL_PATH = Path(_getenv("RF_MODEL_PATH", str(ML_MODELS_DIR / "rf_classifier
 XGB_MODEL_PATH = Path(_getenv("XGB_MODEL_PATH", str(ML_MODELS_DIR / "xgb_regressor.pkl")))
 FEATURES_JSON_PATH = Path(_getenv("FEATURES_JSON_PATH", str(ML_MODELS_DIR / "features.json")))
 
+# Expected-power baseline assets.  These are intentionally separate from the
+# legacy classifier/regressor, which must not be used for operational status.
+EXPECTED_POWER_MODELS_DIR = REPO_ROOT / "model" / "baseline_models"
+EXPECTED_POWER_MODEL_PATH = Path(
+    _getenv(
+        "EXPECTED_POWER_MODEL_PATH",
+        str(EXPECTED_POWER_MODELS_DIR / "expected_power_model.pkl"),
+    )
+)
+EXPECTED_POWER_FEATURES_PATH = Path(
+    _getenv(
+        "EXPECTED_POWER_FEATURES_PATH",
+        str(EXPECTED_POWER_MODELS_DIR / "expected_power_feature_order.json"),
+    )
+)
+EXPECTED_POWER_DAYLIGHT_LUX_MIN: float = float(
+    _getenv("EXPECTED_POWER_DAYLIGHT_LUX_MIN", "5000")
+)

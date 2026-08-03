@@ -10,6 +10,7 @@ RECOMMENDATIONS = {
     "Panel Degradation": "Schedule a panel performance inspection and compare output with its rated specification.",
     "Possible Panel Damage": "Inspect the panel for cracks, hotspots, moisture ingress, and damaged bypass diodes.",
     "Loose Wiring": "Inspect and safely tighten panel, INA219, and connector wiring; look for corrosion or intermittent contacts.",
+    "Low-output anomaly": "Inspect the panel surface and surroundings for shading or soiling, then check wiring. The available data does not confirm a specific physical cause.",
     "No Fault Detected": "Continue monitoring the system. No deterministic hardware or panel cause was detected.",
 }
 

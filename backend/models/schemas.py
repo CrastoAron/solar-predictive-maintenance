@@ -66,6 +66,15 @@ class HardwareStatusResponse(BaseModel):
     ds3231: int
 
 
+class ExpectedPowerResponse(BaseModel):
+    device_id: str
+    timestamp: str
+    actual_power: float
+    expected_power: float | None
+    performance_ratio: float | None
+    operational_status: str
+
+
 class DiagnosticsResponse(BaseModel):
     health: str
     root_cause: str
@@ -73,4 +82,3 @@ class DiagnosticsResponse(BaseModel):
     severity: str
     evidence: list[str]
     recommendation: str
-

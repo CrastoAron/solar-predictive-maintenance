@@ -14,7 +14,7 @@ def test_panel_health_uses_panel_specific_ratings():
     assert evaluate_panel_health({"voltage": 34.0, "current": 7.0}, panel_config) == "normal"
 
 
-def test_diagnostics_uses_saved_panel_ratings_when_provided():
+def test_diagnostics_uses_expected_power_baseline_not_saved_ratings():
     result = run_diagnostics(
         latest_telemetry={
             "voltage": 24.0,
@@ -24,7 +24,12 @@ def test_diagnostics_uses_saved_panel_ratings_when_provided():
             "temperature": 25.0,
             "humidity": 50.0,
         },
-        panel_config={"rated_voltage": 40.0, "rated_current": 8.0},
+        baseline={
+            "expected_power": 200.0,
+            "performance_ratio": 0.72,
+            "operational_status": "Underperforming",
+        },
     )
 
-    assert result.health == "degraded"
+    assert result.health == "Degraded"
+    assert result.root_cause == "Low-output anomaly"

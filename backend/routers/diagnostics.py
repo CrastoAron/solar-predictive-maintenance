@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends, Query
+"""Authenticated, on-demand explainable diagnostics for the latest device state."""
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from config import DEFAULT_DEVICE_ID
 from dependencies import get_current_user
 from diagnostics import run_diagnostics
 from models.schemas import DiagnosticsResponse
-from services.admin_store import admin_store
+from services.expected_power_runner import get_expected_power_runner
 from services.influx_client import get_influx_client
 
 router = APIRouter()
@@ -15,34 +17,27 @@ async def get_diagnostics(
     device_id: str = Query(default=DEFAULT_DEVICE_ID),
     user: dict = Depends(get_current_user),
 ):
-    influx = get_influx_client()
-    latest_sensor = influx.get_latest_sensor(device_id)
-    if latest_sensor is None:
+    influx_client = get_influx_client()
+    telemetry = influx_client.get_latest_sensor(device_id)
+    if telemetry is None:
         return None
 
-    recent_sensor_history_df = influx.get_raw_data_last_minutes(device_id=device_id, minutes=30)
-    recent_sensor_history = [
-        {
-            "timestamp": row["timestamp"].isoformat().replace("+00:00", "Z"),
-            "voltage": row["voltage"],
-            "current": row["current"],
-            "power": row["power"],
-            "lux": row["lux"],
-            "temperature": row["temperature"],
-            "humidity": row["humidity"],
-        }
-        for _, row in recent_sensor_history_df.iterrows()
-    ]
+    runner = get_expected_power_runner()
+    if not runner.is_ready():
+        raise HTTPException(status_code=503, detail="Expected-power baseline assets are not available")
+    try:
+        baseline = runner.predict(telemetry)
+    except (KeyError, TypeError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=f"Invalid telemetry for diagnostics: {error}") from error
 
-    latest_prediction = influx.get_latest_prediction(device_id)
-    latest_hardware_status = influx.get_latest_hardware_status(device_id)
-    panel_config = admin_store.get_panel_by_device_id(device_id)
+    history = influx_client.get_raw_data_last_minutes(device_id=device_id, minutes=30)
+    historical_telemetry = history.to_dict(orient="records") if not history.empty else []
+    hardware_status = influx_client.get_latest_hardware_status(device_id) or {}
 
     result = run_diagnostics(
-        latest_telemetry=latest_sensor,
-        historical_telemetry=recent_sensor_history,
-        ml_prediction=latest_prediction,
-        hardware_status=latest_hardware_status,
-        panel_config=panel_config,
+        latest_telemetry=telemetry,
+        historical_telemetry=historical_telemetry,
+        hardware_status=hardware_status,
+        baseline=baseline,
     )
     return result.to_dict()

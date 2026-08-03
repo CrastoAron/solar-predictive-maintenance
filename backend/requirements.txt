@@ -9,6 +9,7 @@ numpy
 scikit-learn
 xgboost
 joblib
+matplotlib
 python-dotenv
 pydantic
 supabase
