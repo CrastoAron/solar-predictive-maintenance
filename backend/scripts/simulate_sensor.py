@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
+import math
 import random
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import paho.mqtt.client as mqtt
 
@@ -69,6 +74,146 @@ SCENARIOS: dict[str, Scenario] = {
         is_low_light=True,
     ),
 }
+
+SENSOR_NAMES = ("voltage", "current", "lux", "temperature", "humidity")
+HARDWARE_NAMES = ("bme280", "ina219", "bh1750", "ds3231")
+
+
+class LiveSimulationConfig:
+    """Thread-safe settings shared by the publisher and local control page."""
+
+    def __init__(self, args: argparse.Namespace) -> None:
+        self._lock = threading.Lock()
+        self.mode = args.mode
+        self.interval = float(args.interval)
+        self.device_id = args.device_id
+        self.sensor_overrides: dict[str, float] = {}
+        if args.override_sensor and args.override_value is not None:
+            self.sensor_overrides[args.override_sensor] = float(args.override_value)
+        self.hardware_status: dict[str, int] | None = None
+        if args.hardware_status is not None:
+            self.hardware_status = dict(zip(HARDWARE_NAMES, map(int, args.hardware_status)))
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "mode": self.mode,
+                "interval": self.interval,
+                "device_id": self.device_id,
+                "sensor_overrides": dict(self.sensor_overrides),
+                "hardware_status": dict(self.hardware_status) if self.hardware_status else None,
+            }
+
+    def update(self, form: dict[str, list[str]]) -> None:
+        mode = form.get("mode", [self.mode])[0]
+        if mode not in (*SCENARIOS, "mixed"):
+            raise ValueError("Unknown scenario mode.")
+        try:
+            interval = float(form.get("interval", [str(self.interval)])[0])
+        except ValueError as exc:
+            raise ValueError("Interval must be a number.") from exc
+        if not math.isfinite(interval) or interval <= 0:
+            raise ValueError("Interval must be a finite number greater than zero.")
+
+        overrides: dict[str, float] = {}
+        for name in SENSOR_NAMES:
+            raw_value = form.get(f"override_{name}", [""])[0].strip()
+            if raw_value:
+                try:
+                    override_value = float(raw_value)
+                except ValueError as exc:
+                    raise ValueError(f"{name.title()} override must be a number.") from exc
+                if not math.isfinite(override_value):
+                    raise ValueError(f"{name.title()} override must be finite.")
+                overrides[name] = override_value
+
+        enabled = form.get("hardware_enabled", [""])[0] == "on"
+        hardware_status: dict[str, int] | None = None
+        if enabled:
+            hardware_status = {}
+            for name in HARDWARE_NAMES:
+                try:
+                    value = int(form.get(f"hardware_{name}", ["0"])[0])
+                except ValueError as exc:
+                    raise ValueError(f"{name.upper()} status must be an integer from 0 to 5.") from exc
+                if not 0 <= value <= 5:
+                    raise ValueError(f"{name.upper()} status must be between 0 and 5.")
+                hardware_status[name] = value
+
+        with self._lock:
+            self.mode = mode
+            self.interval = interval
+            self.device_id = form.get("device_id", [self.device_id])[0].strip() or self.device_id
+            self.sensor_overrides = overrides
+            self.hardware_status = hardware_status
+
+
+def _control_page(config: dict[str, Any], message: str = "") -> str:
+    overrides = config["sensor_overrides"]
+    hardware = config["hardware_status"] or dict.fromkeys(HARDWARE_NAMES, 0)
+    options = "".join(
+        f'<option value="{mode}" {"selected" if config["mode"] == mode else ""}>{mode.title()}</option>'
+        for mode in ("normal", "degraded", "fault", "night", "mixed")
+    )
+    sensor_inputs = "".join(
+        f'<label>{name.title()} <input type="number" step="any" name="override_{name}" '
+        f'value="{html.escape(str(overrides.get(name, "")))}" placeholder="Automatic"></label>'
+        for name in SENSOR_NAMES
+    )
+    hardware_inputs = "".join(
+        f'<label>{name.upper()} <input type="number" min="0" max="5" name="hardware_{name}" '
+        f'value="{hardware[name]}"></label>'
+        for name in HARDWARE_NAMES
+    )
+    notice = f'<p class="notice">{html.escape(message)}</p>' if message else ""
+    checked = "checked" if config["hardware_status"] else ""
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>SolarShield Simulator</title><style>
+body{{font-family:system-ui,sans-serif;background:#f1f5f9;color:#172033;margin:0;padding:32px}}main{{max-width:760px;margin:auto;background:white;border-radius:16px;padding:28px;box-shadow:0 8px 30px #0f172a18}}h1{{margin-top:0;color:#0f766e}}fieldset{{border:1px solid #cbd5e1;border-radius:10px;margin:18px 0;padding:16px}}legend{{font-weight:700}}label{{display:inline-flex;flex-direction:column;gap:5px;margin:8px;min-width:130px}}input,select{{padding:8px;border:1px solid #94a3b8;border-radius:6px;font:inherit}}button{{background:#0f766e;color:white;border:0;border-radius:7px;padding:11px 18px;font-weight:700;cursor:pointer}}.notice{{background:#dcfce7;color:#166534;padding:10px;border-radius:7px}}small{{color:#475569}}</style></head>
+<body><main><h1>SolarShield Sensor Simulator</h1><p>Changes are used by the next published reading—no simulator restart needed.</p>{notice}
+<form method="post" action="/settings"><fieldset><legend>Scenario</legend><label>Mode <select name="mode">{options}</select></label><label>Publish interval (seconds)<input type="number" min="0.1" step="0.1" name="interval" value="{config["interval"]}"></label><label>Device ID<input name="device_id" value="{html.escape(str(config["device_id"]))}"></label></fieldset>
+<fieldset><legend>Fixed sensor values <small>Leave blank to use scenario-generated data.</small></legend>{sensor_inputs}</fieldset>
+<fieldset><legend><label style="display:inline-flex;flex-direction:row;align-items:center;min-width:0"><input type="checkbox" name="hardware_enabled" {checked}> Include hardware diagnostics</label></legend>{hardware_inputs}</fieldset>
+<button type="submit">Apply settings</button></form></main></body></html>"""
+
+
+def start_control_server(config: LiveSimulationConfig, host: str, port: int) -> ThreadingHTTPServer:
+    class ControlHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            if urlparse(self.path).path != "/":
+                self.send_error(404)
+                return
+            body = _control_page(config.snapshot()).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self) -> None:  # noqa: N802
+            if urlparse(self.path).path != "/settings":
+                self.send_error(404)
+                return
+            length = int(self.headers.get("Content-Length", "0"))
+            form = parse_qs(self.rfile.read(length).decode(), keep_blank_values=True)
+            try:
+                config.update(form)
+                message = "Settings applied."
+            except ValueError as exc:
+                message = f"Could not apply settings: {exc}"
+            body = _control_page(config.snapshot(), message).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: Any) -> None:
+            return
+
+    server = ThreadingHTTPServer((host, port), ControlHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
@@ -313,6 +458,13 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run an interactive prompt to configure the simulation.",
     )
+    p.add_argument(
+        "--web",
+        action="store_true",
+        help="Start a local control page that can change settings while the simulator runs.",
+    )
+    p.add_argument("--web-host", default="127.0.0.1", help="Control page host (default: 127.0.0.1)")
+    p.add_argument("--web-port", type=int, default=8765, help="Control page port (default: 8765)")
     return p.parse_args()
 
 
@@ -338,18 +490,11 @@ def main() -> None:
 
     random.seed()  # use system entropy
 
-    sensor_overrides: dict[str, float] = {}
-    if args.override_sensor and args.override_value is not None:
-        sensor_overrides[args.override_sensor] = float(args.override_value)
-
-    hardware_status: dict[str, int] | None = None
-    if args.hardware_status is not None:
-        hardware_status = {
-            "bme280": int(args.hardware_status[0]),
-            "ina219": int(args.hardware_status[1]),
-            "bh1750": int(args.hardware_status[2]),
-            "ds3231": int(args.hardware_status[3]),
-        }
+    live_config = LiveSimulationConfig(args)
+    control_server: ThreadingHTTPServer | None = None
+    if args.web:
+        control_server = start_control_server(live_config, args.web_host, args.web_port)
+        print(f"Simulator controls: http://{args.web_host}:{args.web_port}")
 
     client = mqtt.Client()
     client.connect(args.host, args.port, keepalive=60)
@@ -361,20 +506,27 @@ def main() -> None:
             "Run model/train_expected_power.py first."
         )
 
+    # QoS 1 publishing requires Paho's network loop to receive PUBACKs and
+    # flush queued messages. Without it the terminal keeps printing generated
+    # samples while the broker stops receiving them after the in-flight queue
+    # fills, which makes the dashboard appear frozen until a restart.
+    client.loop_start()
+
     sent = 0
     try:
         while True:
+            settings = live_config.snapshot()
             scenario = choose_scenario(
-                args.mode,
+                str(settings["mode"]),
                 degraded_prob=float(args.degraded_prob),
                 fault_prob=float(args.fault_prob),
             )
             payload, target_ratio = _make_payload(
-                device_id=args.device_id,
+                device_id=str(settings["device_id"]),
                 scenario=scenario,
                 expected_power_runner=expected_power_runner,
-                sensor_overrides=sensor_overrides if sensor_overrides else None,
-                hardware_status=hardware_status,
+                sensor_overrides=settings["sensor_overrides"] or None,
+                hardware_status=settings["hardware_status"],
             )
             payload_str = json.dumps(payload, separators=(",", ":"))
 
@@ -400,11 +552,17 @@ def main() -> None:
 
             if args.count and sent >= int(args.count):
                 break
-            time.sleep(float(args.interval))
+            time.sleep(float(settings["interval"]))
     except KeyboardInterrupt:
         pass
     finally:
-        client.disconnect()
+        try:
+            client.disconnect()
+        finally:
+            client.loop_stop()
+        if control_server is not None:
+            control_server.shutdown()
+            control_server.server_close()
 
 
 if __name__ == "__main__":

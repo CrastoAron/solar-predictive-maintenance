@@ -234,6 +234,24 @@ source .venv/bin/activate
 python3 scripts/simulate_sensor.py --host localhost --port 1883 --topic solar/sensors --interval 2
 ```
 
+### Live simulator control page (recommended for demos)
+
+Start the simulator with its local control page:
+
+```bash
+cd backend
+source .venv/bin/activate
+python3 scripts/simulate_sensor.py --web
+```
+
+Open **http://localhost:8765** in a browser. You can switch between normal,
+degraded, fault, night, and mixed scenarios; adjust the publish interval; set
+individual sensor values; and add hardware diagnostic statuses. Click **Apply
+settings** and the next reading uses the new values—no simulator restart is
+needed. The dashboard polls live readings every five seconds, so allow up to
+five seconds for the new scenario to appear. The page is bound to localhost
+only by default. Use `--web-port 9000` to select another port.
+
 Force only fault samples:
 
 ```bash

@@ -408,7 +408,11 @@ from(bucket: "{INFLUX_BUCKET_ALERTS}")
 """
         rows = self._query_rows(query)
 
+        # Alert events are append-only in InfluxDB. Expose the newest state for
+        # each alert type so an old unresolved fault does not remain active after
+        # a later resolved event is written.
         out: list[dict[str, Any]] = []
+        seen_types: set[str] = set()
         for row in rows:
             dt = row.get("_time")
             if dt is None:
@@ -426,7 +430,12 @@ from(bucket: "{INFLUX_BUCKET_ALERTS}")
             if message is None or resolved is None:
                 continue
 
-            resolved_bool = bool(resolved)
+            alert_type = str(type_) if type_ is not None else "fault"
+            if alert_type in seen_types:
+                continue
+            seen_types.add(alert_type)
+
+            resolved_bool = resolved if isinstance(resolved, bool) else str(resolved).lower() == "true"
 
             diag_obj = None
             if diagnostics_raw is not None:
@@ -441,7 +450,7 @@ from(bucket: "{INFLUX_BUCKET_ALERTS}")
             out.append(
                 {
                     "id": "",
-                    "type": str(type_) if type_ is not None else "fault",
+                    "type": alert_type,
                     "severity": str(severity) if severity is not None else "medium",
                     "message": str(message),
                     "timestamp": _utc_iso_z(dt),
@@ -492,4 +501,3 @@ def get_influx_client() -> InfluxClient:
     if _influx_client is None:
         _influx_client = InfluxClient()
     return _influx_client
-

@@ -56,6 +56,10 @@ export interface MaintenanceData {
   when_to_clean?: string | null;
   panel_damaged?: boolean | null;
   panel_health?: string | null;
+  active_alert_count: number;
+  highest_alert_severity?: "high" | "medium" | "low" | null;
+  alert_message?: string | null;
+  maintenance_trigger?: string | null;
 }
 export interface HardwareStatusData {
   device_id: string;
@@ -103,6 +107,17 @@ async function apiFetch<T>(path: string): Promise<T> {
       if (currentAuth) await signOut(currentAuth);
       if (typeof window !== "undefined") window.location.href = "/login";
       throw new Error("Unauthorized");
+    }
+
+    if (!res.ok) {
+      let detail = `Request failed: ${res.status}`;
+      try {
+        const body = (await res.json()) as { detail?: string };
+        if (body.detail) detail = body.detail;
+      } catch {
+        // Keep the HTTP status when the server did not return JSON.
+      }
+      throw new Error(detail);
     }
 
     return (await res.json()) as T;
