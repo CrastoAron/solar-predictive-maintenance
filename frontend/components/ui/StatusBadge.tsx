@@ -29,6 +29,34 @@ const statusConfig: Record<string, { bg: string; text: string; dot: string; ring
     ring: "ring-red-500/30",
     label: "Fault",
   },
+  Underperforming: {
+    bg: "bg-amber-500/15",
+    text: "text-amber-400",
+    dot: "bg-amber-400",
+    ring: "ring-amber-500/30",
+    label: "Underperforming",
+  },
+  "Strong anomaly": {
+    bg: "bg-red-500/15",
+    text: "text-red-400",
+    dot: "bg-red-400",
+    ring: "ring-red-500/30",
+    label: "Strong anomaly",
+  },
+  "Not evaluated (low light)": {
+    bg: "bg-slate-500/15",
+    text: "text-slate-300",
+    dot: "bg-slate-400",
+    ring: "ring-slate-500/30",
+    label: "Not evaluated (low light)",
+  },
+  Unknown: {
+    bg: "bg-slate-500/15",
+    text: "text-slate-300",
+    dot: "bg-slate-400",
+    ring: "ring-slate-500/30",
+    label: "Unknown",
+  },
 };
 
 export default function StatusBadge({ status, large }: StatusBadgeProps) {

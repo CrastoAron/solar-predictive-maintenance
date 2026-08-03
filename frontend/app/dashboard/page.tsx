@@ -5,15 +5,13 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useAppContext } from "@/lib/app-context";
 import { useToast } from "@/lib/toast-context";
-import { getLive, getPredictions, getHistory, getHardwareStatus, getDiagnostics, LiveData, PredictionData, HardwareStatusData, DiagnosticResult } from "@/lib/api";
+import { getLive, getExpectedPower, getHistory, getHardwareStatus, getDiagnostics, LiveData, ExpectedPowerData, HardwareStatusData, DiagnosticResult } from "@/lib/api";
 import NavSidebar from "@/components/ui/NavSidebar";
 import MetricCard from "@/components/ui/MetricCard";
 import StatusBadge from "@/components/ui/StatusBadge";
 import LineChart from "@/components/ui/LineChart";
 import ErrorState from "@/components/ui/ErrorState";
 import { Zap, Activity, Gauge, TrendingUp, RefreshCw } from "lucide-react";
-
-const FAULT_LABELS: Record<number, string> = { 0: "Normal", 1: "Degraded", 2: "Fault" };
 
 const STATUS_LABELS: Record<number, string> = {
   0: "OK",
@@ -35,7 +33,6 @@ const STATUS_CLASSES: Record<number, string> = {
 
 // Polling intervals (ms)
 const LIVE_POLL_MS  = 5_000;
-const PRED_POLL_MS  = 10_000;
 const DIAGNOSTICS_POLL_MS = 5_000;
 
 export default function DashboardPage() {
@@ -45,7 +42,7 @@ export default function DashboardPage() {
   const { addToast } = useToast();
 
   const [live, setLive] = useState<LiveData | null>(null);
-  const [predictions, setPredictions] = useState<PredictionData | null>(null);
+  const [expectedPower, setExpectedPower] = useState<ExpectedPowerData | null>(null);
   const [hardwareStatus, setHardwareStatus] = useState<HardwareStatusData | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticResult | null>(null);
   const [chartData, setChartData] = useState<{ timestamp: string; value: number }[]>([]);
@@ -54,7 +51,7 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
 
   const intervalRef     = useRef<ReturnType<typeof setInterval> | null>(null);
-  const predIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const expectedPowerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hardwareIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const diagIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -86,13 +83,12 @@ export default function DashboardPage() {
     }
   }, [setConnectionStatus, addToast]);
 
-  const fetchPredictions = useCallback(async () => {
+  const fetchExpectedPower = useCallback(async () => {
     try {
-      const p = await getPredictions();
-      setPredictions(p);
+      setExpectedPower(await getExpectedPower());
     } catch (e) {
       console.error(e);
-      setPredictions(null);
+      setExpectedPower(null);
     }
   }, []);
 
@@ -119,14 +115,14 @@ export default function DashboardPage() {
   // Start / stop intervals
   const startPolling = useCallback(() => {
     if (!intervalRef.current)        intervalRef.current        = setInterval(fetchLive, LIVE_POLL_MS);
-    if (!predIntervalRef.current)    predIntervalRef.current    = setInterval(fetchPredictions, PRED_POLL_MS);
+    if (!expectedPowerIntervalRef.current) expectedPowerIntervalRef.current = setInterval(fetchExpectedPower, DIAGNOSTICS_POLL_MS);
     if (!hardwareIntervalRef.current) hardwareIntervalRef.current = setInterval(fetchHardwareStatus, LIVE_POLL_MS);
     if (!diagIntervalRef.current)    diagIntervalRef.current    = setInterval(fetchDiagnostics, DIAGNOSTICS_POLL_MS);
-  }, [fetchLive, fetchPredictions, fetchHardwareStatus, fetchDiagnostics]);
+  }, [fetchLive, fetchExpectedPower, fetchHardwareStatus, fetchDiagnostics]);
 
   const stopPolling = useCallback(() => {
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
-    if (predIntervalRef.current) { clearInterval(predIntervalRef.current); predIntervalRef.current = null; }
+    if (expectedPowerIntervalRef.current) { clearInterval(expectedPowerIntervalRef.current); expectedPowerIntervalRef.current = null; }
     if (hardwareIntervalRef.current) { clearInterval(hardwareIntervalRef.current); hardwareIntervalRef.current = null; }
     if (diagIntervalRef.current) { clearInterval(diagIntervalRef.current); diagIntervalRef.current = null; }
   }, []);
@@ -137,7 +133,7 @@ export default function DashboardPage() {
 
     setConnectionStatus("connecting");
     fetchLive();
-    fetchPredictions();
+    fetchExpectedPower();
     fetchHardwareStatus();
     fetchDiagnostics();
 
@@ -150,7 +146,7 @@ export default function DashboardPage() {
 
     startPolling();
     return () => stopPolling();
-  }, [user, fetchLive, fetchPredictions, fetchDiagnostics, startPolling, stopPolling, setConnectionStatus]);
+  }, [user, fetchLive, fetchExpectedPower, fetchHardwareStatus, fetchDiagnostics, startPolling, stopPolling, setConnectionStatus]);
 
   // Pause polling when tab is hidden, resume when visible
   useEffect(() => {
@@ -161,7 +157,7 @@ export default function DashboardPage() {
         stopPolling();
       } else {
         fetchLive();
-        fetchPredictions();
+        fetchExpectedPower();
         fetchHardwareStatus();
         fetchDiagnostics();
         startPolling();
@@ -170,19 +166,19 @@ export default function DashboardPage() {
 
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
-  }, [user, fetchLive, fetchPredictions, fetchHardwareStatus, fetchDiagnostics, startPolling, stopPolling]);
+  }, [user, fetchLive, fetchExpectedPower, fetchHardwareStatus, fetchDiagnostics, startPolling, stopPolling]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
     await fetchLive();
-    await fetchPredictions();
+    await fetchExpectedPower();
     await fetchHardwareStatus();
     await fetchDiagnostics();
     setRefreshing(false);
     addToast("success", "Dashboard refreshed successfully.");
   };
 
-  const status = predictions ? FAULT_LABELS[predictions.fault_class] ?? "Normal" : "Normal";
+  const status = expectedPower?.operational_status ?? "Not evaluated (low light)";
 
   return (
     <div className="flex min-h-screen bg-[#0f1117]">
@@ -232,16 +228,16 @@ export default function DashboardPage() {
                 color="blue"
               />
               <MetricCard
-                label="Power"
+                label="Actual Power"
                 value={live?.power ?? "—"}
                 unit="W"
                 icon={<Gauge className="w-4 h-4" />}
                 color="purple"
               />
               <MetricCard
-                label="Efficiency"
-                value={predictions ? `${predictions.efficiency_score.toFixed(1)}` : "—"}
-                unit="%"
+                label="Expected Power"
+                value={expectedPower?.expected_power?.toFixed(2) ?? "—"}
+                unit="W"
                 icon={<TrendingUp className="w-4 h-4" />}
                 color="green"
               />
@@ -270,12 +266,13 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="glass-card p-5">
-                  <p className="text-sm text-slate-500 uppercase tracking-widest mb-4">Prediction</p>
+                  <p className="text-sm text-slate-500 uppercase tracking-widest mb-4">Expected-Power Baseline</p>
                   <div className="space-y-3">
                     {[
-                      { label: "Fault Status",   value: predictions?.fault_label ?? "—" },
-                      { label: "Maintenance In", value: predictions ? `${predictions.maintenance_days} days` : "—" },
-                      { label: "Predicted At",   value: predictions ? new Date(predictions.predicted_at).toLocaleTimeString() : "—" },
+                      { label: "Expected Power", value: expectedPower?.expected_power !== null && expectedPower?.expected_power !== undefined ? `${expectedPower.expected_power.toFixed(2)} W` : "—" },
+                      { label: "Performance", value: expectedPower?.performance_ratio !== null && expectedPower?.performance_ratio !== undefined ? `${(expectedPower.performance_ratio * 100).toFixed(1)}%` : "—" },
+                      { label: "Status", value: expectedPower?.operational_status ?? "—" },
+                      { label: "Evaluated At", value: expectedPower ? new Date(expectedPower.timestamp).toLocaleTimeString() : "—" },
                     ].map(({ label, value }) => (
                       <div key={label} className="flex items-center justify-between">
                         <span className="text-slate-400 text-base">{label}</span>
