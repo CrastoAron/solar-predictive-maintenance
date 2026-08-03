@@ -2,14 +2,23 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import random
 import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
 import paho.mqtt.client as mqtt
+
+# This script is normally run as `python scripts/simulate_sensor.py` from the
+# backend directory. Ensure local service imports also work from other CWDs.
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from services.expected_power_runner import ExpectedPowerRunner, get_expected_power_runner
 
 
 @dataclass
@@ -17,37 +26,47 @@ class Scenario:
     name: str
     lux_range: tuple[float, float]
     voltage_range: tuple[float, float]
-    current_range: tuple[float, float]
     temperature_range: tuple[float, float]
     humidity_range: tuple[float, float]
+    performance_ratio_range: tuple[float, float] | None = None
+    is_low_light: bool = False
 
 
 SCENARIOS: dict[str, Scenario] = {
     "normal": Scenario(
         name="normal",
-        lux_range=(45_000, 95_000),
-        voltage_range=(17.0, 21.5),
-        current_range=(1.6, 3.2),
-        temperature_range=(25.0, 40.0),
-        humidity_range=(35.0, 75.0),
+        lux_range=(20_000, 54_000),
+        voltage_range=(7.0, 11.0),
+        temperature_range=(25.0, 45.0),
+        humidity_range=(40.0, 80.0),
+        performance_ratio_range=(0.90, 1.05),
     ),
-    # Degraded output: low lux or partially shaded; slightly higher temps.
+    # Daylight output is 55--75% of the same baseline used by the dashboard.
     "degraded": Scenario(
         name="degraded",
-        lux_range=(12_000, 40_000),
-        voltage_range=(14.0, 18.5),
-        current_range=(0.8, 2.0),
-        temperature_range=(30.0, 55.0),
-        humidity_range=(35.0, 85.0),
+        lux_range=(20_000, 50_000),
+        voltage_range=(7.0, 11.0),
+        temperature_range=(25.0, 50.0),
+        humidity_range=(40.0, 85.0),
+        performance_ratio_range=(0.55, 0.75),
     ),
-    # Fault: very low current / abnormal readings; very hot module.
+    # Daylight output is 10--45% of expected output, a strong anomaly.
     "fault": Scenario(
         name="fault",
-        lux_range=(5_000, 30_000),
-        voltage_range=(10.0, 16.0),
-        current_range=(0.05, 0.8),
-        temperature_range=(45.0, 75.0),
-        humidity_range=(20.0, 90.0),
+        lux_range=(15_000, 45_000),
+        voltage_range=(7.0, 11.0),
+        temperature_range=(25.0, 50.0),
+        humidity_range=(40.0, 85.0),
+        performance_ratio_range=(0.10, 0.45),
+    ),
+    # Low light is normal nighttime behaviour, not a fault condition.
+    "night": Scenario(
+        name="night",
+        lux_range=(0.0, 4_999.0),
+        voltage_range=(0.0, 1.0),
+        temperature_range=(20.0, 35.0),
+        humidity_range=(45.0, 90.0),
+        is_low_light=True,
     ),
 }
 
@@ -60,55 +79,69 @@ def _rand_range(rng: tuple[float, float]) -> float:
     return random.uniform(rng[0], rng[1])
 
 
-def _daylight_factor(t: float) -> float:
-    """
-    Smooth 0..1 factor to emulate a daylight curve.
-    `t` is a monotonically increasing time (seconds).
-    """
-    # ~2 minute cycle for quick visual changes in UI while testing.
-    phase = (t % 120.0) / 120.0
-    # cosine bell: 0 at night edges, 1 mid-day
-    return 0.5 - 0.5 * math.cos(2 * math.pi * phase)
-
-
 def _make_payload(
     *,
     device_id: str,
     scenario: Scenario,
-    t0: float,
+    expected_power_runner: ExpectedPowerRunner,
     sensor_overrides: dict[str, float] | None = None,
     hardware_status: dict[str, int] | None = None,
-) -> dict:
+) -> tuple[dict[str, Any], float | None]:
+    """Create telemetry that deterministically exercises the expected-power statuses.
+
+    Daylight scenarios first obtain the baseline's expected output, then set
+    current so `voltage * current` lands in that scenario's ratio band. The
+    expected-power model therefore sees the same scale at simulation and
+    dashboard time. No internal testing fields are added to the MQTT payload.
+    """
     now = datetime.now(timezone.utc)
-    daylight = _daylight_factor(time.time() - t0)
-
-    # Base values from scenario ranges.
-    lux_base = _rand_range(scenario.lux_range)
-    # Scale lux by daylight curve (keeps values moving, even in "normal").
-    lux = lux_base * (0.2 + 0.8 * daylight)
-
+    lux = _rand_range(scenario.lux_range)
     voltage = _rand_range(scenario.voltage_range)
-    current = _rand_range(scenario.current_range)
     temperature = _rand_range(scenario.temperature_range)
     humidity = _rand_range(scenario.humidity_range)
 
-    # Add a tiny bit of sensor noise.
+    # Add a tiny bit of sensor noise before calculating controlled output.
     voltage += random.uniform(-0.15, 0.15)
-    current += random.uniform(-0.05, 0.05)
     temperature += random.uniform(-0.4, 0.4)
     humidity += random.uniform(-1.0, 1.0)
 
     # Ensure plausible bounds.
     lux = _clamp(lux, 0.0, 120_000.0)
     voltage = _clamp(voltage, 0.0, 30.0)
-    current = _clamp(current, 0.0, 10.0)
     temperature = _clamp(temperature, -10.0, 100.0)
     humidity = _clamp(humidity, 0.0, 100.0)
+
+    timestamp = now.isoformat().replace("+00:00", "Z")
+    if scenario.is_low_light:
+        current = 0.0
+        target_ratio = None
+    else:
+        # Expected power is independent of the temporary voltage/current values.
+        baseline = expected_power_runner.predict(
+            {
+                "device_id": device_id,
+                "timestamp": timestamp,
+                "voltage": voltage,
+                "current": 0.0,
+                "power": 0.0,
+                "lux": lux,
+                "temperature": temperature,
+                "humidity": humidity,
+            }
+        )
+        expected_power = baseline["expected_power"]
+        if expected_power is None:
+            raise RuntimeError("Daylight simulator scenario received a low-light baseline result.")
+        target_ratio = _rand_range(scenario.performance_ratio_range or (1.0, 1.0))
+        target_power = float(expected_power) * target_ratio
+        current = target_power / max(voltage, 0.1)
+
+    current = _clamp(current, 0.0, 10.0)
 
     payload = {
         "device_id": device_id,
         # Backend accepts ISO-8601; MQTT subscriber normalizes it to "...Z".
-        "timestamp": now.isoformat().replace("+00:00", "Z"),
+        "timestamp": timestamp,
         "voltage": round(voltage, 3),
         "current": round(current, 3),
         "lux": round(lux, 1),
@@ -130,7 +163,7 @@ def _make_payload(
             "ds3231": int(hardware_status["ds3231"]),
         }
 
-    return payload
+    return payload, target_ratio
 
 
 def _prompt(text: str, default: str) -> str:
@@ -202,7 +235,7 @@ def interactive_config(args: argparse.Namespace) -> None:
     args.device_id = _prompt("Device id", args.device_id)
     args.interval = _prompt_float("Publish interval (seconds)", args.interval)
     args.count = _prompt_int("Number of messages to publish (0 = forever)", args.count, 0)
-    args.mode = _prompt_choice("Scenario mode", ["normal", "degraded", "fault", "mixed"], args.mode)
+    args.mode = _prompt_choice("Scenario mode", ["normal", "degraded", "fault", "night", "mixed"], args.mode)
 
     if _prompt_yes_no("Override a specific sensor value?", False):
         sensor = _prompt_choice(
@@ -233,7 +266,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--interval", type=float, default=2.0, help="Seconds between publishes (default: 2.0)")
     p.add_argument(
         "--mode",
-        choices=["normal", "degraded", "fault", "mixed"],
+        choices=["normal", "degraded", "fault", "night", "mixed"],
         default="mixed",
         help="Scenario mode (default: mixed)",
     )
@@ -321,7 +354,13 @@ def main() -> None:
     client = mqtt.Client()
     client.connect(args.host, args.port, keepalive=60)
 
-    t0 = time.time()
+    expected_power_runner = get_expected_power_runner()
+    if not expected_power_runner.is_ready():
+        raise RuntimeError(
+            "Expected-power baseline assets are required for controlled scenarios. "
+            "Run model/train_expected_power.py first."
+        )
+
     sent = 0
     try:
         while True:
@@ -330,10 +369,10 @@ def main() -> None:
                 degraded_prob=float(args.degraded_prob),
                 fault_prob=float(args.fault_prob),
             )
-            payload = _make_payload(
+            payload, target_ratio = _make_payload(
                 device_id=args.device_id,
                 scenario=scenario,
-                t0=t0,
+                expected_power_runner=expected_power_runner,
                 sensor_overrides=sensor_overrides if sensor_overrides else None,
                 hardware_status=hardware_status,
             )
@@ -354,6 +393,8 @@ def main() -> None:
                 f"[{sent:05d}] mode={scenario.name:<8} "
                 f"V={payload['voltage']:>6} I={payload['current']:>6} "
                 f"lux={payload['lux']:>8} T={payload['temperature']:>6} "
+                f"P={payload['voltage'] * payload['current']:>6.3f} "
+                f"ratio={'low-light' if target_ratio is None else f'{target_ratio:.0%}':>9} "
                 f"H={payload['humidity']:>6} ts={payload['timestamp']}" + status_details
             )
 
@@ -368,4 +409,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

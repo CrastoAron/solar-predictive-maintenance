@@ -1,0 +1,61 @@
+{
+  "source_directory": "model/data",
+  "source_file_count": 43,
+  "raw_row_count": 2541,
+  "clean_row_count": 2477,
+  "excluded_row_count": 64,
+  "removed_exact_duplicate_count": 0,
+  "quality_counts": {
+    "invalid_timestamp": 0,
+    "missing_required_value": 60,
+    "invalid_voltage": 0,
+    "invalid_current": 0,
+    "invalid_temperature": 64,
+    "invalid_humidity": 60,
+    "invalid_lux": 0
+  },
+  "clean_timestamp_range_utc": {
+    "start": "2026-04-25T16:05:00Z",
+    "end": "2026-07-01T17:44:00Z"
+  },
+  "clean_columns": [
+    "timestamp",
+    "voltage",
+    "current",
+    "power",
+    "lux",
+    "temperature",
+    "humidity",
+    "source_file",
+    "source_row",
+    "quality_flag"
+  ],
+  "rules": {
+    "voltage_range_v": [
+      0,
+      32
+    ],
+    "current_range_a": [
+      0,
+      10
+    ],
+    "temperature_range_c": [
+      -10,
+      80
+    ],
+    "humidity_range_percent": [
+      0,
+      100
+    ],
+    "lux_range": [
+      0,
+      120000
+    ],
+    "nighttime_zero_values": "retained",
+    "timestamp_formats_accepted": [
+      "%Y-%m-%d %H:%M",
+      "%Y-%m-%d %H:%M:%S",
+      "%m/%d/%y %H:%M"
+    ]
+  }
+}

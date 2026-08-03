@@ -5,6 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import CORS_ORIGINS
 from routers.alerts import router as alerts_router
+from routers.diagnostics import router as diagnostics_router
+from routers.expected_power import router as expected_power_router
 from routers.history import router as history_router
 from routers.hardware_status import router as hardware_status_router
 from routers.live import router as live_router
@@ -59,6 +61,8 @@ app.add_middleware(
 app.include_router(live_router)
 app.include_router(history_router)
 app.include_router(hardware_status_router)
+app.include_router(expected_power_router)
+app.include_router(diagnostics_router)
 app.include_router(predictions_router)
 app.include_router(alerts_router)
 app.include_router(maintenance_router)
@@ -67,4 +71,3 @@ app.include_router(maintenance_router)
 @app.get("/health")
 async def health_check() -> dict[str, str]:
     return {"status": "ok"}
-

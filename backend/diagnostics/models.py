@@ -88,6 +88,26 @@ class MLPrediction:
 
 
 @dataclass(frozen=True)
+class BaselineAssessment:
+    """Observed output compared with the independently trained daylight baseline."""
+
+    expected_power: float | None = None
+    performance_ratio: float | None = None
+    operational_status: str = "Not evaluated (low light)"
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any] | None) -> "BaselineAssessment":
+        value = value or {}
+        expected_power = value.get("expected_power")
+        performance_ratio = value.get("performance_ratio")
+        return cls(
+            expected_power=_number(expected_power) if expected_power is not None else None,
+            performance_ratio=_number(performance_ratio) if performance_ratio is not None else None,
+            operational_status=str(value.get("operational_status", "Not evaluated (low light)")),
+        )
+
+
+@dataclass(frozen=True)
 class CandidateCause:
     cause: str
     severity: str
@@ -114,3 +134,4 @@ TelemetryInput = Telemetry | Mapping[str, Any]
 HistoryInput = Sequence[Telemetry | Mapping[str, Any]]
 PredictionInput = MLPrediction | Mapping[str, Any] | None
 HardwareStatusInput = HardwareStatus | Mapping[str, Any] | None
+BaselineInput = BaselineAssessment | Mapping[str, Any] | None

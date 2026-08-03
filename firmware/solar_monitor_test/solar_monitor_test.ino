@@ -15,9 +15,9 @@
 #include <time.h>
 
 // USER CONFIGURATION (Matching the original project)
-#define WIFI_SSID       "YOUR_WIFI_SSID"
-#define WIFI_PASSWORD   "YOUR_WIFI_PASSWORD"
-#define MQTT_SERVER     "YOUR_MQTT_BROKER_IP"
+#define WIFI_SSID       "Batman"
+#define WIFI_PASSWORD   "gothamneedsme"
+#define MQTT_SERVER     "192.168.137.50"
 #define MQTT_PORT       1883
 #define MQTT_USER       ""   // leave "" if none
 #define MQTT_PASSWORD   ""   // leave "" if none

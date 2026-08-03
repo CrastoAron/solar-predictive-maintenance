@@ -12,13 +12,12 @@ from diagnostics.constants import (
     HARDWARE_STATUS_NAMES,
     LOOSE_WIRING_CURRENT_RATIO,
     LOOSE_WIRING_VOLTAGE_RATIO,
-    LOW_EFFICIENCY_RATIO,
     LOW_POWER_WATTS,
     MIN_DAYLIGHT_LUX,
     MIN_HISTORY_SAMPLES,
     PARTIAL_SHADING_RATIO,
 )
-from diagnostics.models import CandidateCause, HardwareStatus, Telemetry
+from diagnostics.models import BaselineAssessment, CandidateCause, HardwareStatus, Telemetry
 
 
 @dataclass(frozen=True)
@@ -26,6 +25,7 @@ class DiagnosticContext:
     latest: Telemetry
     history: Sequence[Telemetry]
     hardware_status: HardwareStatus
+    baseline: BaselineAssessment
 
     @property
     def daylight_history(self) -> list[Telemetry]:
@@ -66,6 +66,31 @@ class SensorFailureRule:
         # A reported hardware fault takes precedence over inferred panel causes,
         # because those causes may be based on unreliable sensor readings.
         return CandidateCause(self.name, severity, evidence, 95.0 + min(len(failed) - 1, 2) * 2)
+
+
+class LowOutputAnomalyRule:
+    """Report a baseline deviation without claiming an unproven physical cause."""
+
+    name = "Low-output anomaly"
+
+    def evaluate(self, context: DiagnosticContext) -> CandidateCause | None:
+        baseline = context.baseline
+        if baseline.operational_status not in {"Underperforming", "Strong anomaly"}:
+            return None
+        if baseline.expected_power is None or baseline.performance_ratio is None:
+            return None
+
+        severity = "High" if baseline.operational_status == "Strong anomaly" else "Medium"
+        return CandidateCause(
+            self.name,
+            severity,
+            (
+                f"Measured power is {context.latest.power:.2f} W versus an expected {baseline.expected_power:.2f} W.",
+                f"The performance ratio is {baseline.performance_ratio:.0%} ({baseline.operational_status.lower()}).",
+                "No specific physical cause is confirmed from the available telemetry.",
+            ),
+            64.0 if severity == "Medium" else 76.0,
+        )
 
 
 class PartialShadingRule:
@@ -197,4 +222,5 @@ DEFAULT_RULES: tuple[DiagnosticRule, ...] = (
     PartialShadingRule(),
     DustAccumulationRule(),
     PanelDegradationRule(),
+    LowOutputAnomalyRule(),
 )

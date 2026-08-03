@@ -6,7 +6,7 @@ ML-driven predictive maintenance and efficiency analysis backend for solar panel
 
 - **Ingests live sensor readings** via MQTT and stores them in **InfluxDB 2.x**
 - **Captures optional hardware diagnostics** from MQTT payloads and stores them alongside sensor readings
-- **Serves REST APIs** for live values, history charts, predictions, alerts, hardware diagnostics, and maintenance guidance
+- **Serves REST APIs** for live values, history charts, expected-power assessment, explainable diagnostics, predictions, alerts, hardware diagnostics, and maintenance guidance
 - **Runs a background scheduler** that periodically:
   - pulls last ~30 minutes of sensor data from InfluxDB
   - computes features
@@ -195,7 +195,7 @@ source .venv/bin/activate
 python3 scripts/simulate_sensor.py
 ```
 
-Run (mixed normal/degraded/fault samples):
+Run mixed daylight samples:
 
 ```bash
 cd backend
@@ -232,6 +232,25 @@ Include optional hardware diagnostics in the payload:
 ```bash
 python3 scripts/simulate_sensor.py --hardware-status 0 0 0 5
 ```
+
+### Simulator scenarios and expected-power status
+
+The simulator creates test readings as a controlled fraction of the same expected-power baseline used by the dashboard. It preserves the existing MQTT payload fields and does not publish a model result in MQTT.
+
+- `--mode normal` produces 90--105% of expected daylight power → `Normal`
+- `--mode degraded` produces 55--75% of expected daylight power → `Underperforming`
+- `--mode fault` produces 10--45% of expected daylight power → `Strong anomaly`
+- `--mode night` produces `lux < 5000` and zero current → `Not evaluated (low light)`
+
+The expected-power assets in `model/baseline_models/` must exist before using these controlled modes. Run `python3 ../model/train_expected_power.py` from `backend/` if they need to be regenerated.
+
+For an ESP32 hardware-failure test, combine any mode with a non-zero hardware code, for example:
+
+```bash
+python3 scripts/simulate_sensor.py --mode normal --hardware-status 0 4 0 0
+```
+
+This retains normal panel output but should show `Sensor Failure` in explainable diagnostics for the INA219 read-error status.
 
 ## Data ingestion contract (MQTT payload)
 
@@ -300,6 +319,10 @@ All endpoints below require:
   - returns latest alerts list (may be empty)
 - `GET /api/hardware-status?device_id=...`
   - returns the latest device diagnostics snapshot with `bme280`, `ina219`, `bh1750`, and `ds3231`
+- `GET /api/expected-power?device_id=...`
+  - returns actual power, expected daylight power, performance ratio, and operational status
+- `GET /api/diagnostics?device_id=...`
+  - returns a read-only, explainable diagnostic result based on the latest telemetry, recent history, ESP32 hardware status, and expected-power assessment
 - `GET /api/maintenance?device_id=...`
   - derived view based on latest prediction + efficiency trend
 
@@ -317,7 +340,7 @@ All endpoints below require:
 
 ## Diagnostics module
 
-`backend/diagnostics/` is an independent, deterministic root-cause analysis module. It does not alter MQTT ingestion, InfluxDB storage, the ML pipeline, API routes, or the frontend. It consumes telemetry, historical telemetry, an optional ML prediction, and ESP32 hardware-status values, then returns an explainable diagnostic result.
+`backend/diagnostics/` is an independent, deterministic root-cause analysis module. It does not alter MQTT ingestion, InfluxDB storage, the legacy ML pipeline, or any payload schema. The read-only `GET /api/diagnostics` endpoint supplies it with telemetry, recent history, ESP32 hardware-status values, and the expected-power baseline, then returns an explainable diagnostic result.
 
 The module includes rule-based detectors for:
 
@@ -327,8 +350,9 @@ The module includes rule-based detectors for:
 - Panel Degradation
 - Possible Panel Damage
 - Loose Wiring
+- Low-output anomaly (an observed deviation when no physical cause is confirmed)
 
-The ML prediction supplies the overall health label when available; diagnostics rules independently determine the likely cause, evidence, confidence score, severity, and maintenance recommendation.
+Each rule is deterministic and independently collects evidence. The expected-power baseline identifies a low-output deviation; diagnostics only names a physical cause when rule evidence supports it. Otherwise it reports `Low-output anomaly` rather than making an unsupported claim. The legacy classifier is not used by this endpoint.
 
 ### Diagnostics requirements
 
@@ -368,11 +392,36 @@ result = run_diagnostics(
         "humidity": 55,
     },
     historical_telemetry=history,
-    ml_prediction={"fault_class": 2, "fault_label": "Fault"},
     hardware_status={"bme280": 0, "ina219": 0, "bh1750": 0, "ds3231": 0},
+    baseline={
+        "expected_power": 36.4,
+        "performance_ratio": 0.05,
+        "operational_status": "Strong anomaly",
+    },
 )
 
 print(result.to_dict())
 ```
 
-The example should identify `Partial Shading` with evidence and a confidence score. To test sensor diagnostics, set a hardware status to a non-zero value, for example `"bme280": 4`; the primary cause should become `Sensor Failure`.
+The example should identify a deterministic cause with evidence and a confidence score. To test sensor diagnostics, set a hardware status to a non-zero value, for example `"bme280": 4`; the primary cause should become `Sensor Failure`. To test the safe fallback, pass an empty history with an `Underperforming` or `Strong anomaly` baseline; the result will be `Low-output anomaly`, not an unproven physical cause.
+
+## Expected-power baseline
+
+`GET /api/expected-power` uses the separately trained baseline in `model/baseline_models/`. It does not use or alter the legacy classifier/regressor or scheduler. For the latest sensor reading, it predicts expected power from lux, temperature, humidity, and UTC time of day, then returns an operational status based on `actual_power / expected_power`.
+
+`GET /api/diagnostics` uses the same assessment as one input. It runs on demand and writes no new data to InfluxDB.
+
+The baseline is evaluated only at or above 5,000 lux. At low light it returns `Not evaluated (low light)` with `expected_power` and `performance_ratio` set to `null`, because nighttime zero output is normal rather than anomalous.
+
+Example response:
+
+```json
+{
+  "device_id": "esp32-01",
+  "timestamp": "2026-06-25T12:00:00Z",
+  "actual_power": 2.0,
+  "expected_power": 2.1,
+  "performance_ratio": 0.95,
+  "operational_status": "Normal"
+}
+```

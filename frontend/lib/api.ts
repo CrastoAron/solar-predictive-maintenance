@@ -62,6 +62,24 @@ export interface HardwareStatusData {
   bh1750: number;
   ds3231: number;
 }
+
+export interface ExpectedPowerData {
+  device_id: string;
+  timestamp: string;
+  actual_power: number;
+  expected_power: number | null;
+  performance_ratio: number | null;
+  operational_status: "Normal" | "Underperforming" | "Strong anomaly" | "Not evaluated (low light)";
+}
+
+export interface DiagnosticResult {
+  health: "Normal" | "Degraded" | "Fault" | "Unknown";
+  root_cause: string;
+  confidence: number;
+  severity: "Low" | "Medium" | "High";
+  evidence: string[];
+  recommendation: string;
+}
 // ── Core fetch helper ─────────────────────────────────────────────────────
 
 async function apiFetch<T>(path: string): Promise<T> {
@@ -136,3 +154,9 @@ export const getMaintenance = () =>
 
 export const getHardwareStatus = () =>
   apiFetch<HardwareStatusData | null>("/api/hardware-status");
+
+export const getExpectedPower = () =>
+  apiFetch<ExpectedPowerData | null>("/api/expected-power");
+
+export const getDiagnostics = () =>
+  apiFetch<DiagnosticResult | null>("/api/diagnostics");

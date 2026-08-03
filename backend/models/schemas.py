@@ -62,3 +62,20 @@ class HardwareStatusResponse(BaseModel):
     bh1750: int
     ds3231: int
 
+
+class ExpectedPowerResponse(BaseModel):
+    device_id: str
+    timestamp: str
+    actual_power: float
+    expected_power: float | None
+    performance_ratio: float | None
+    operational_status: str
+
+
+class DiagnosticsResponse(BaseModel):
+    health: str
+    root_cause: str
+    confidence: int
+    severity: str
+    evidence: List[str]
+    recommendation: str
