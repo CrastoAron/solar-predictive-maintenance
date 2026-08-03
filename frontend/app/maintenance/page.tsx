@@ -1,12 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { getMaintenance, getPredictions, MaintenanceData, PredictionData } from "@/lib/api";
 import NavSidebar from "@/components/ui/NavSidebar";
 import ErrorState from "@/components/ui/ErrorState";
 import { Wrench, Calendar, TrendingUp, TrendingDown, Minus, Clock } from "lucide-react";
+
+function formatDateOnly(value?: string | null) {
+  if (!value) return "—";
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return "—";
+  return new Date(year, month - 1, day).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
 
 function TrendIcon({ trend }: { trend: string }) {
   if (trend === "improving") return <TrendingUp className="w-5 h-5 text-emerald-400" />;
@@ -28,42 +39,74 @@ export default function MaintenancePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [retryToken, setRetryToken] = useState(0);
+  const [awaitingPrediction, setAwaitingPrediction] = useState(false);
 
   useEffect(() => {
     if (!user) router.replace("/login");
   }, [user, router]);
 
+  const fetchAll = useCallback(async (canUpdate: () => boolean = () => true) => {
+    try {
+      const [maintenanceResult, predictionResult] = await Promise.allSettled([
+        getMaintenance(),
+        getPredictions(),
+      ]);
+      if (maintenanceResult.status === "rejected") throw maintenanceResult.reason;
+
+      const maintenance = maintenanceResult.value;
+      if (!canUpdate()) return;
+
+      if (!maintenance) {
+        setMaint(null);
+        setPred(null);
+        setAwaitingPrediction(true);
+        setLastUpdated(new Date());
+        setError(null);
+        return;
+      }
+
+      setMaint(maintenance);
+      setPred(predictionResult.status === "fulfilled" ? predictionResult.value : null);
+      setAwaitingPrediction(false);
+      setLastUpdated(new Date());
+      setError(null);
+    } catch (e) {
+      console.error(e);
+      if (canUpdate()) {
+        setAwaitingPrediction(false);
+        setError(e instanceof Error ? e.message : "Failed to load maintenance data.");
+      }
+    } finally {
+      if (canUpdate()) setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
-    const fetchAll = async () => {
-      try {
-        const [m, p] = await Promise.all([getMaintenance(), getPredictions()]);
-        if (cancelled) return;
-        setMaint(m);
-        setPred(p);
-        setLastUpdated(new Date());
-        setError(null);
-      } catch (e) {
-        console.error(e);
-        if (!cancelled) setError("Failed to load maintenance data.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+    const poll = async () => {
+      await fetchAll(() => !cancelled);
+      if (!cancelled) timeoutId = setTimeout(poll, 10_000);
     };
 
-    fetchAll();
-    const id = setInterval(fetchAll, 10_000);
+    poll();
     return () => {
       cancelled = true;
-      clearInterval(id);
+      if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [user]);
+  }, [user, fetchAll, retryToken]);
 
-  const daysLeft = maint?.days_remaining ?? pred?.maintenance_days ?? 0;
+  const retry = () => {
+    setLoading(true);
+    setRetryToken((value) => value + 1);
+  };
+
+  const daysLeft = maint?.days_remaining;
   const urgency =
-    daysLeft <= 7 ? "red" : daysLeft <= 30 ? "amber" : "green";
+    daysLeft === undefined ? "green" : daysLeft <= 7 ? "red" : daysLeft <= 30 ? "amber" : "green";
 
   const urgencyStyles: Record<string, { ring: string; text: string; bg: string }> = {
     red: { ring: "ring-red-500/30", text: "text-red-400", bg: "from-red-500/10 to-red-500/5" },
@@ -86,15 +129,40 @@ export default function MaintenancePage() {
 
         {/* Error state */}
         {error && !loading ? (
-          <ErrorState message={error} onRetry={() => window.location.reload()} />
+          <ErrorState message={error} onRetry={retry} />
         ) : loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="skeleton h-48 rounded-2xl" />
             <div className="skeleton h-48 rounded-2xl" />
             <div className="skeleton h-32 col-span-full rounded-2xl" />
           </div>
+        ) : awaitingPrediction ? (
+          <div className="glass-card py-20 px-6 flex flex-col items-center gap-4 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-orange-500/15 flex items-center justify-center">
+              <Clock className="w-7 h-7 text-orange-400" />
+            </div>
+            <div>
+              <p className="text-white font-semibold text-lg">Waiting for the first maintenance prediction</p>
+              <p className="text-slate-400 text-sm mt-2 max-w-md">
+                Send fresh sensor telemetry to InfluxDB. The backend will generate a prediction automatically; this page checks again every 10 seconds.
+              </p>
+            </div>
+          </div>
         ) : (
           <div className="space-y-6">
+            {maint?.maintenance_trigger && (
+              <div className={`rounded-2xl border p-5 ${
+                (maint.highest_alert_severity === "high" || maint.days_remaining === 0)
+                  ? "border-red-500/30 bg-red-500/10"
+                  : "border-amber-500/30 bg-amber-500/10"
+              }`}>
+                <p className="text-sm font-semibold text-white capitalize">
+                  {maint.maintenance_trigger}
+                </p>
+                {maint.alert_message && <p className="text-sm text-slate-300 mt-1">{maint.alert_message}</p>}
+              </div>
+            )}
+
             {/* Top cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
               {/* Countdown */}
@@ -108,7 +176,7 @@ export default function MaintenancePage() {
                   <p className="text-slate-400 text-xs uppercase tracking-wide mb-1">
                     Days Until Maintenance
                   </p>
-                  <p className={`text-5xl font-black ${u.text} leading-none`}>{daysLeft}</p>
+                  <p className={`text-5xl font-black ${u.text} leading-none`}>{daysLeft ?? "—"}</p>
                   <p className="text-slate-400 text-sm mt-1">days remaining</p>
                 </div>
               </div>
@@ -140,15 +208,7 @@ export default function MaintenancePage() {
                   <p className="text-slate-400 text-xs uppercase tracking-wide mb-1">
                     Next Service
                   </p>
-                  <p className="text-xl font-bold text-white">
-                    {maint?.next_service_date
-                      ? new Date(maint.next_service_date).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })
-                      : "—"}
-                  </p>
+                  <p className="text-xl font-bold text-white">{formatDateOnly(maint?.next_service_date)}</p>
                 </div>
               </div>
 
@@ -161,7 +221,9 @@ export default function MaintenancePage() {
                   <p className="text-slate-400 text-xs uppercase tracking-wide mb-1">Panel Health</p>
                   <p className="text-xl font-bold text-white">{maint?.panel_health ?? "—"}</p>
                   <p className="text-slate-400 text-sm mt-1">Damaged: {maint?.panel_damaged === true ? "Yes" : maint?.panel_damaged === false ? "No" : "—"}</p>
-                  <p className="text-slate-400 text-sm mt-1">When to clean: {maint?.when_to_clean ? new Date(maint.when_to_clean).toLocaleDateString() : "—"}</p>
+                  <p className="text-slate-400 text-sm mt-1">
+                    When to clean: {maint?.when_to_clean ? formatDateOnly(maint.when_to_clean) : "Not required now"}
+                  </p>
                 </div>
               </div>
             </div>
@@ -179,28 +241,6 @@ export default function MaintenancePage() {
               </p>
             </div>
 
-            {/* ML info */}
-            {pred && (
-              <div className="glass-card p-6">
-                <p className="section-title mb-4">ML Prediction Details</p>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {[
-                    { label: "Fault Class", value: pred.fault_class },
-                    { label: "Fault Label", value: pred.fault_label },
-                    { label: "Efficiency Score", value: `${pred.efficiency_score.toFixed(1)}%` },
-                    {
-                      label: "Predicted At",
-                      value: new Date(pred.predicted_at).toLocaleString(),
-                    },
-                  ].map(({ label, value }) => (
-                    <div key={label}>
-                      <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">{label}</p>
-                      <p className="text-white font-semibold">{value}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         )}
       </main>

@@ -15,7 +15,7 @@ from routers.live import router as live_router
 from routers.maintenance import router as maintenance_router
 from routers.predictions import router as predictions_router
 from services.influx_client import get_influx_client
-from services.ml_runner import get_ml_runner
+from services.expected_power_runner import get_expected_power_runner
 from services.mqtt_client import MQTTSubscriber
 from services.scheduler import get_prediction_scheduler
 
@@ -23,15 +23,15 @@ from services.scheduler import get_prediction_scheduler
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     influx_client = get_influx_client()
-    ml_runner = get_ml_runner()
+    expected_power_runner = get_expected_power_runner()
     mqtt_subscriber = MQTTSubscriber(influx_client=influx_client)
     prediction_scheduler = get_prediction_scheduler(
         influx_client=influx_client,
-        ml_runner=ml_runner,
+        expected_power_runner=expected_power_runner,
     )
 
     app.state.influx_client = influx_client
-    app.state.ml_runner = ml_runner
+    app.state.expected_power_runner = expected_power_runner
     app.state.mqtt_subscriber = mqtt_subscriber
     app.state.prediction_scheduler = prediction_scheduler
 

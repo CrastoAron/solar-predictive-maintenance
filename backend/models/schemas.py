@@ -55,6 +55,10 @@ class MaintenanceResponse(BaseModel):
     when_to_clean: Optional[str] = None
     panel_damaged: Optional[bool] = None
     panel_health: Optional[str] = None
+    active_alert_count: int = 0
+    highest_alert_severity: Optional[str] = None
+    alert_message: Optional[str] = None
+    maintenance_trigger: Optional[str] = None
 
 
 class HardwareStatusResponse(BaseModel):
