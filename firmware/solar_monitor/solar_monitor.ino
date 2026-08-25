@@ -1,11 +1,11 @@
 /*
- * Solar Panel Monitor - ESP32 Deep Sleep + MQTT
+ * Solar Panel Monitor - ESP32 Night Sleep + MQTT
  *
  * Hardware:
  *   I2C Bus 0 (GPIO 21/22): DS3231 RTC, BH1750, INA219
  *   I2C Bus 1 (GPIO 16/17): BME280
  *
- * Sleep interval: 10 minutes
+ * Night sleep check interval: 10 minutes
  */
 
 #include <Wire.h>
@@ -16,23 +16,33 @@
 #include <Adafruit_INA219.h>
 #include <Adafruit_BME280.h>
 #include <ArduinoJson.h>
+#include <time.h>
 
 
 // USER CONFIGURATION
-#define WIFI_SSID       "YOUR_WIFI_SSID"
-#define WIFI_PASSWORD   "YOUR_WIFI_PASSWORD"
-#define MQTT_SERVER     "YOUR_MQTT_BROKER_IP"
+#define WIFI_SSID       "Batman"
+#define WIFI_PASSWORD   "gothamneedsme"
+#define MQTT_SERVER     "192.168.65.2"
 #define MQTT_PORT       1883
-#define MQTT_USER       "YOUR_MQTT_USERNAME"   // leave "" if none
-#define MQTT_PASSWORD   "YOUR_MQTT_PASSWORD"   // leave "" if none
+#define MQTT_USER       ""   // leave "" if none
+#define MQTT_PASSWORD   ""   // leave "" if none
 #define MQTT_CLIENT_ID  "solar_monitor_01"
 #define MQTT_TOPIC      "solar/sensors"
 
 
 // TIMING
-#define SLEEP_MINUTES   10ULL
+#define NIGHT_SLEEP_MINUTES 10ULL
 #define uS_TO_MIN       (60ULL * 1000000ULL)
-#define SLEEP_DURATION  (SLEEP_MINUTES * uS_TO_MIN)
+#define NIGHT_SLEEP_DURATION (NIGHT_SLEEP_MINUTES * uS_TO_MIN)
+#define DAYLIGHT_THRESHOLD_LUX 5.0f
+#define NIGHT_START_HOUR 20
+#define NIGHT_END_HOUR 6
+#define PUBLISH_INTERVAL_MS (10UL * 60UL * 1000UL)
+#define SENSOR_CHECK_INTERVAL_MS 10000UL
+
+#define NTP_SERVER      "pool.ntp.org"
+#define UTC_OFFSET_SEC  0
+#define DAYLIGHT_OFFSET_SEC 0
 
 
 // I2C BUS DEFINITIONS
@@ -107,7 +117,10 @@ bool    readSensors(SensorData &data);
 bool    connectWiFi();
 bool    connectMQTT();
 bool    publishData(const SensorData &data);
-void    goToSleep();
+bool    syncRtcFromNtp();
+bool    isNightTime(const DateTime &time);
+bool    shouldSleepAtNight(const SensorData &data);
+void    goToNightSleep();
 String  buildJSON(const SensorData &data);
 void    updateHardwareStatus();
 void    validateSensorReadings(SensorData &data);
@@ -116,9 +129,11 @@ void    printHardwareStatus();
 void    setHardwareStatus(const char *device, uint8_t &status, uint8_t nextStatus);
 bool    isValidRtcTime(const DateTime &time);
 bool    isI2CDeviceResponsive(TwoWire &bus, uint8_t address);
+unsigned long lastPublishTime = 0;
+unsigned long lastSensorCheckTime = 0;
 
 
-// SETUP (runs once per wake cycle)
+// SETUP
 void setup() {
   Serial.begin(115200);
   delay(100);
@@ -128,29 +143,37 @@ void setup() {
   // Initialise I2C buses
   I2C_0.begin(I2C0_SDA, I2C0_SCL, 100000);
   I2C_1.begin(I2C1_SDA, I2C1_SCL, 100000);
+  I2C_0.setClock(100000);
+  I2C_1.setClock(100000);
+  delay(500);
 
   SensorData data;
 
   initSensors();
 
+  mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
+  mqttClient.setBufferSize(512);
+
+  if (!connectWiFi()) {
+    Serial.println(F("[ERROR] WiFi failed. Will retry."));
+    return;
+  }
+
+  syncRtcFromNtp();
+
   // A failed sensor is diagnostic information, not a reason to prevent the
   // remaining healthy sensors from publishing telemetry.
   readSensors(data);
 
-  // WiFi on only when needed
-  if (!connectWiFi()) {
-    Serial.println(F("[ERROR] WiFi failed. Sleeping."));
-    goToSleep();
+  if (shouldSleepAtNight(data)) {
+    Serial.println(F("[Night] Night schedule detected. Entering deep sleep."));
+    shutdownPeripherals();
+    goToNightSleep();
     return;
   }
 
-  mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
-  mqttClient.setBufferSize(512);
-
   if (!connectMQTT()) {
-    Serial.println(F("[ERROR] MQTT failed. Sleeping."));
-    WiFi.disconnect(true);
-    goToSleep();
+    Serial.println(F("[ERROR] MQTT failed. Will retry."));
     return;
   }
 
@@ -160,12 +183,51 @@ void setup() {
     Serial.println(F("[ERROR] Publish failed."));
   }
 
-  shutdownPeripherals();
-  goToSleep();
+  lastPublishTime = millis();
+  lastSensorCheckTime = millis();
 }
 
 void loop() {
-  // Never reached — deep sleep restarts via setup()
+  unsigned long now = millis();
+
+  if (WiFi.status() != WL_CONNECTED) {
+    connectWiFi();
+    return;
+  }
+
+  if (ds3231Ready && (rtc.lostPower() || !isValidRtcTime(rtc.now()))) {
+    syncRtcFromNtp();
+  }
+
+  if (!mqttClient.connected()) {
+    connectMQTT();
+  } else {
+    mqttClient.loop();
+  }
+
+  if (now - lastSensorCheckTime < SENSOR_CHECK_INTERVAL_MS) {
+    return;
+  }
+  lastSensorCheckTime = now;
+
+  SensorData data;
+  readSensors(data);
+
+  if (shouldSleepAtNight(data)) {
+    Serial.println(F("[Night] Night schedule detected. Entering deep sleep."));
+    shutdownPeripherals();
+    goToNightSleep();
+    return;
+  }
+
+  if (mqttClient.connected() && now - lastPublishTime >= PUBLISH_INTERVAL_MS) {
+    if (publishData(data)) {
+      Serial.println(F("[OK] Data published."));
+    } else {
+      Serial.println(F("[ERROR] Publish failed."));
+    }
+    lastPublishTime = now;
+  }
 }
 
 
@@ -207,12 +269,13 @@ bool initSensors() {
     setHardwareStatus("BH1750", hardwareStatus.bh1750, STATUS_OK);
   }
 
-  // BME280 (I2C Bus 1, default address 0x76)
-  if (!bme.begin(0x76, &I2C_1)) {
+  // BME280 (I2C Bus 1; try both supported addresses)
+  if (!bme.begin(0x77, &I2C_1) && !bme.begin(0x76, &I2C_1)) {
     Serial.println(F("[ERROR] BME280 not found"));
     setHardwareStatus("BME280", hardwareStatus.bme280, STATUS_DEVICE_NOT_FOUND);
   } else {
     bme280Ready = true;
+    delay(300);
     Serial.println(F("[OK] BME280 initialized"));
     setHardwareStatus("BME280", hardwareStatus.bme280, STATUS_OK);
   }
@@ -395,6 +458,55 @@ bool isValidRtcTime(const DateTime &time) {
          time.hour() <= 23 && time.minute() <= 59;
 }
 
+bool syncRtcFromNtp() {
+  if (!ds3231Ready) {
+    return false;
+  }
+
+  DateTime rtcTime = rtc.now();
+  if (isValidRtcTime(rtcTime) && !rtc.lostPower()) {
+    return true;
+  }
+
+  configTime(UTC_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
+  struct tm timeinfo;
+  Serial.print(F("[Time] Synchronizing RTC with NTP"));
+
+  for (uint8_t attempt = 0; attempt < 20; ++attempt) {
+    if (getLocalTime(&timeinfo, 500) && timeinfo.tm_year >= 120) {
+      rtc.adjust(DateTime(timeinfo.tm_year + 1900, timeinfo.tm_mon + 1,
+                         timeinfo.tm_mday, timeinfo.tm_hour,
+                         timeinfo.tm_min, timeinfo.tm_sec));
+      setHardwareStatus("DS3231", hardwareStatus.ds3231, STATUS_OK);
+      Serial.println();
+      Serial.println(F("[Time] RTC synchronized from NTP"));
+      return true;
+    }
+    Serial.print('.');
+  }
+
+  Serial.println();
+  Serial.println(F("[Time] NTP sync failed; retaining RTC time"));
+  return false;
+}
+
+bool isNightTime(const DateTime &time) {
+  return time.hour() >= NIGHT_START_HOUR || time.hour() < NIGHT_END_HOUR;
+}
+
+bool shouldSleepAtNight(const SensorData &data) {
+  if (ds3231Ready) {
+    DateTime currentTime = rtc.now();
+    if (isValidRtcTime(currentTime) && !rtc.lostPower()) {
+      // RTC time is authoritative; lux alone can be reduced by clouds or shade.
+      return isNightTime(currentTime);
+    }
+  }
+
+  // If the RTC cannot be trusted, use the light sensor as a safe fallback.
+  return bh1750Ready && data.light < DAYLIGHT_THRESHOLD_LUX;
+}
+
 bool isI2CDeviceResponsive(TwoWire &bus, uint8_t address) {
   bus.beginTransmission(address);
   return bus.endTransmission() == 0;
@@ -495,11 +607,11 @@ void shutdownPeripherals() {
   delay(100);
 }
 
-// DEEP SLEEP
-void goToSleep() {
-  Serial.printf("[Sleep] Sleeping for %llu minutes...\n", SLEEP_MINUTES);
+// NIGHT DEEP SLEEP
+void goToNightSleep() {
+  Serial.printf("[Sleep] Night sleep for %llu minutes...\n", NIGHT_SLEEP_MINUTES);
   Serial.flush();
 
-  esp_sleep_enable_timer_wakeup(SLEEP_DURATION);
+  esp_sleep_enable_timer_wakeup(NIGHT_SLEEP_DURATION);
   esp_deep_sleep_start();
 }
