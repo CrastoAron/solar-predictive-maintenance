@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+"""Compatibility launcher that adds SolarShield's ``--https`` switch to Uvicorn.
+
+Uvicorn itself has no plugin mechanism for arbitrary CLI flags, so this small
+shim removes only this project-specific flag and delegates all other arguments
+to the installed Uvicorn module unchanged.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    https_mode = "--https" in args
+    args = [argument for argument in args if argument != "--https"]
+
+    environment = os.environ.copy()
+    environment["BACKEND_MODE"] = "https" if https_mode else "mqtt"
+    return subprocess.call([sys.executable, "-m", "uvicorn", *args], env=environment)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

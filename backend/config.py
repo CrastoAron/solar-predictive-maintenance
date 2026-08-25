@@ -11,6 +11,17 @@ def _getenv(name: str, default: str | None = None) -> str | None:
     return value
 
 
+# The launcher sets this to ``https`` only when it receives ``--https``.
+# Omitting that argument deliberately preserves the existing MQTT startup.
+BACKEND_MODE: str = (_getenv("BACKEND_MODE", "mqtt") or "mqtt").lower()
+if BACKEND_MODE not in {"mqtt", "https"}:
+    raise ValueError("BACKEND_MODE must be either 'mqtt' or 'https'")
+
+# Optional defense for the public tunnel endpoint.  When configured, ESP32
+# requests must send its value as the X-Device-Token header.
+ESP32_INGEST_TOKEN: str | None = _getenv("ESP32_INGEST_TOKEN")
+
+
 # MQTT
 MQTT_HOST: str = _getenv("MQTT_HOST", "localhost")  # e.g. localhost
 MQTT_PORT: int = int(_getenv("MQTT_PORT", "1883"))  # e.g. 1883

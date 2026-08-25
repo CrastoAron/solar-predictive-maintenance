@@ -4,7 +4,7 @@ ML-driven predictive maintenance and efficiency analysis backend for solar panel
 
 ## What this backend does
 
-- **Ingests live sensor readings** via MQTT and stores them in **InfluxDB 2.x**
+- **Ingests live sensor readings** via MQTT (default) or HTTPS through Cloudflare Tunnel, then stores them in **InfluxDB 2.x**
 - **Captures optional hardware diagnostics** from MQTT payloads and stores them alongside sensor readings
 - **Serves REST APIs** for live values, history charts, predictions, alerts, hardware diagnostics, and maintenance guidance
 - **Runs a background scheduler** that periodically:
@@ -24,7 +24,7 @@ ML-driven predictive maintenance and efficiency analysis backend for solar panel
 
 ## Repository layout (backend)
 
-- `main.py`: FastAPI app + startup/shutdown lifecycle (starts MQTT + scheduler)
+- `main.py`: FastAPI app + startup/shutdown lifecycle (starts MQTT or Cloudflare Tunnel + scheduler)
 - `config.py`: environment variables and defaults
 - `dependencies.py`: auth dependency (`get_current_user`)
 - `routers/`: API routes
@@ -106,6 +106,18 @@ The backend uses `python-dotenv` to load environment variables. You can export t
 - `MQTT_PORT` (default: `1883`)
 - `MQTT_TOPIC` (default: `solar/sensors`)
 - `MQTT_QOS` (default: `1`)
+
+### Optional HTTPS ingestion via Cloudflare Tunnel
+
+The normal startup remains MQTT-only. HTTPS mode is opt-in and does not start
+the MQTT subscriber. Both transports call the same validation and InfluxDB
+write path.
+
+- `ESP32_INGEST_TOKEN` (strongly recommended): a shared secret sent by the
+  ESP32 in `X-Device-Token`. When unset, the endpoint permits unauthenticated
+  requests for local testing only.
+- `cloudflared` must be installed and available on `PATH` before HTTPS startup.
+  Confirm this with `cloudflared --version`.
 
 ### Firebase auth (required for `/api/*`)
 
@@ -206,6 +218,43 @@ cd backend
 source .venv/bin/activate
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+This starts the existing MQTT subscriber and is unchanged.
+
+### 4a) Optional: start HTTPS + Cloudflare Tunnel
+
+Stock Uvicorn deliberately rejects unknown command-line flags. This repository
+therefore provides a tiny compatibility launcher at `scripts/uvicorn`, which
+passes all standard Uvicorn options through unchanged and recognizes only
+`--https`. Add it to the front of `PATH` once in the activated backend shell:
+
+```bash
+cd backend
+source .venv/bin/activate
+export PATH="$PWD/scripts:$PATH"
+```
+
+Then the requested commands work exactly as follows:
+
+```bash
+# Default: existing MQTT mode (no --mqtt flag exists)
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+# Optional HTTPS mode: FastAPI + Cloudflare Quick Tunnel
+uvicorn main:app --reload --host 0.0.0.0 --port 8000 --https
+```
+
+HTTPS mode prints the generated `https://…trycloudflare.com` URL and the exact
+ESP32 endpoint (`/ingest/sensor`) after the tunnel connects. Quick Tunnel URLs
+are temporary and change every time the backend restarts, including a reload;
+copy the newly printed URL into `HTTPS_INGEST_URL` in
+`firmware/solar_monitor/solar_monitor.ino` before uploading the HTTPS firmware.
+Set `TRANSPORT_HTTPS` to `1` there. Leave it at `0` to retain MQTT.
+
+The ESP32 POST body is the same JSON produced for MQTT, including
+`hardware_status`; the backend accepts its existing `light` field as an alias
+for `lux` and uses `DEFAULT_DEVICE_ID` when the firmware payload has no
+`device_id`.
 
 Health check (no auth):
 

@@ -11,6 +11,8 @@
 #include <Wire.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
 #include <RTClib.h>
 #include <BH1750.h>
 #include <Adafruit_INA219.h>
@@ -28,6 +30,13 @@
 #define MQTT_PASSWORD   ""   // leave "" if none
 #define MQTT_CLIENT_ID  "solar_monitor_01"
 #define MQTT_TOPIC      "solar/sensors"
+
+// Communication mode: keep 0 for the existing MQTT path.  Set to 1 only
+// after starting the backend with --https and copying its printed endpoint.
+#define TRANSPORT_HTTPS 0
+#define HTTPS_INGEST_URL "https://example.trycloudflare.com/ingest/sensor"
+// Must match ESP32_INGEST_TOKEN if that backend environment variable is set.
+#define HTTPS_DEVICE_TOKEN ""
 
 
 // TIMING
@@ -63,6 +72,7 @@ Adafruit_BME280   bme;
 
 WiFiClient        wifiClient;
 PubSubClient      mqttClient(wifiClient);
+WiFiClientSecure  httpsClient;
 
 // HARDWARE DIAGNOSTICS
 // These numeric values are sent in every MQTT telemetry payload.
@@ -117,6 +127,7 @@ bool    readSensors(SensorData &data);
 bool    connectWiFi();
 bool    connectMQTT();
 bool    publishData(const SensorData &data);
+bool    publishDataHttps(const String &payload);
 bool    syncRtcFromNtp();
 bool    isNightTime(const DateTime &time);
 bool    shouldSleepAtNight(const SensorData &data);
@@ -151,8 +162,10 @@ void setup() {
 
   initSensors();
 
+#if !TRANSPORT_HTTPS
   mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
   mqttClient.setBufferSize(512);
+#endif
 
   if (!connectWiFi()) {
     Serial.println(F("[ERROR] WiFi failed. Will retry."));
@@ -172,10 +185,12 @@ void setup() {
     return;
   }
 
+#if !TRANSPORT_HTTPS
   if (!connectMQTT()) {
     Serial.println(F("[ERROR] MQTT failed. Will retry."));
     return;
   }
+#endif
 
   if (publishData(data)) {
     Serial.println(F("[OK] Data published."));
@@ -199,11 +214,13 @@ void loop() {
     syncRtcFromNtp();
   }
 
+#if !TRANSPORT_HTTPS
   if (!mqttClient.connected()) {
     connectMQTT();
   } else {
     mqttClient.loop();
   }
+#endif
 
   if (now - lastSensorCheckTime < SENSOR_CHECK_INTERVAL_MS) {
     return;
@@ -220,7 +237,11 @@ void loop() {
     return;
   }
 
-  if (mqttClient.connected() && now - lastPublishTime >= PUBLISH_INTERVAL_MS) {
+  if (
+#if !TRANSPORT_HTTPS
+      mqttClient.connected() &&
+#endif
+      now - lastPublishTime >= PUBLISH_INTERVAL_MS) {
     if (publishData(data)) {
       Serial.println(F("[OK] Data published."));
     } else {
@@ -580,23 +601,56 @@ String buildJSON(const SensorData &data) {
   return payload;
 }
 
-// MQTT PUBLISH
+// TRANSPORT PUBLISH (the JSON structure is shared by MQTT and HTTPS)
 bool publishData(const SensorData &data) {
   String payload = buildJSON(data);
 
+#if TRANSPORT_HTTPS
+  Serial.printf("[HTTPS] Posting: %s\n", payload.c_str());
+  return publishDataHttps(payload);
+#else
   Serial.printf("[MQTT] Publishing: %s\n", payload.c_str());
-
   return mqttClient.publish(MQTT_TOPIC, payload.c_str(), true);
+#endif
+}
+
+bool publishDataHttps(const String &payload) {
+  // Quick Tunnel URLs use publicly trusted certificates.  For production,
+  // replace this with setCACert(...) containing the active issuing root CA.
+  // setInsecure is used here so a changing trycloudflare.com certificate does
+  // not break field testing; it still encrypts traffic but skips CA validation.
+  httpsClient.setInsecure();
+
+  HTTPClient http;
+  if (!http.begin(httpsClient, HTTPS_INGEST_URL)) {
+    Serial.println(F("[HTTPS] Could not start HTTPS connection"));
+    return false;
+  }
+  http.addHeader("Content-Type", "application/json");
+  if (strlen(HTTPS_DEVICE_TOKEN) > 0) {
+    http.addHeader("X-Device-Token", HTTPS_DEVICE_TOKEN);
+  }
+  int statusCode = http.POST(payload);
+  http.end();
+
+  if (statusCode == HTTP_CODE_ACCEPTED) {
+    Serial.println(F("[HTTPS] Telemetry accepted"));
+    return true;
+  }
+  Serial.printf("[HTTPS] POST failed, status=%d\n", statusCode);
+  return false;
 }
 
 // ShutDown Peripherals
 void shutdownPeripherals() {
   Serial.flush();
 
+#if !TRANSPORT_HTTPS
   if (mqttClient.connected()) {
     mqttClient.disconnect();
     delay(100);
   }
+#endif
 
   WiFi.disconnect(true);   
   WiFi.mode(WIFI_OFF);
