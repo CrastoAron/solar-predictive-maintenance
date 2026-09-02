@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from config import DEFAULT_DEVICE_ID
 from dependencies import get_current_user
@@ -10,9 +10,10 @@ router = APIRouter()
 
 @router.get("/api/live", response_model=LiveResponse | None)
 async def get_live(
+    response: Response,
     device_id: str = Query(default=DEFAULT_DEVICE_ID),
     user: dict = Depends(get_current_user),
 ):
+    response.headers["Cache-Control"] = "no-store"
     influx = get_influx_client()
     return influx.get_latest_sensor(device_id)
-

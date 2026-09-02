@@ -5,7 +5,8 @@ ML-driven predictive maintenance and efficiency analysis backend for solar panel
 ## What this backend does
 
 - **Ingests live sensor readings** via MQTT and stores them in **InfluxDB 2.x**
-- **Captures optional hardware diagnostics** from MQTT payloads and stores them alongside sensor readings
+- **Accepts ESP32 telemetry** over HTTP(S) at `POST /api/telemetry` (including through ngrok)
+- **Captures optional hardware diagnostics** from telemetry payloads and stores them alongside sensor readings
 - **Serves REST APIs** for live values, history charts, predictions, alerts, hardware diagnostics, and maintenance guidance
 - **Runs a background scheduler** that periodically:
   - pulls last ~30 minutes of sensor data from InfluxDB
@@ -37,6 +38,7 @@ ML-driven predictive maintenance and efficiency analysis backend for solar panel
   - `firebase_admin.py`: Firebase token verification
 - `scripts/generate_dummy_models.py`: generates test ML assets for local development
 - `scripts/simulate_sensor.py`: publishes simulated sensor readings to MQTT (for end-to-end testing)
+- `scripts/simulate_sensor_ngrok.py`: posts simulated sensor readings to `POST /api/telemetry` through ngrok HTTPS
 - `ml_models/`: ML assets (created locally; not required to be committed)
 
 ## Requirements
@@ -106,6 +108,9 @@ The backend uses `python-dotenv` to load environment variables. You can export t
 - `MQTT_PORT` (default: `1883`)
 - `MQTT_TOPIC` (default: `solar/sensors`)
 - `MQTT_QOS` (default: `1`)
+- `ESP32_NAIVE_TIMESTAMP_UTC_OFFSET_MINUTES` (default: `330`): UTC offset for
+  legacy ESP32 timestamps with no `Z` or explicit offset. ISO/RFC3339
+  timestamps that include a timezone are always converted correctly.
 
 ### Firebase auth (required for `/api/*`)
 
@@ -213,7 +218,78 @@ Health check (no auth):
 curl http://localhost:8000/health
 ```
 
-### 5) Simulate sensor readings (end-to-end testing)
+### 5) Expose the API to an ESP32 with ngrok HTTPS
+
+Keep the API server above running, then open a second terminal and run:
+
+```bash
+ngrok config add-authtoken <YOUR_NGROK_AUTHTOKEN>
+ngrok http 8000
+```
+
+The first command is needed once per machine. Obtain the token from your ngrok
+account and keep it out of source control; it is stored by the ngrok CLI, not in
+this repository. The second command prints a forwarding address such as
+`https://example.ngrok-free.app`. ngrok terminates HTTPS and forwards requests
+to the existing Uvicorn server at `http://localhost:8000`.
+
+Use that HTTPS address in the ESP32 request URL:
+
+```text
+https://example.ngrok-free.app/api/telemetry
+```
+
+`POST /api/telemetry` accepts the same JSON telemetry fields used by the MQTT
+subscriber and writes them through the same InfluxDB path. MQTT remains active
+and unchanged, so either transport (or both) can be used.
+
+Example request to verify the tunnel:
+
+```bash
+curl --request POST https://example.ngrok-free.app/api/telemetry \
+  --header "Content-Type: application/json" \
+  --data '{"device_id":"esp32-01","timestamp":"2026-08-30T12:00:00Z","voltage":18.2,"current":1.4,"lux":45000,"temperature":31.5,"humidity":55.0}'
+```
+
+A successful request returns HTTP `202` with `{"status":"accepted"}`. The
+optional `hardware_status` object must contain integer `bme280`, `ina219`,
+`bh1750`, and `ds3231` values in the range `0..5`.
+
+The free ngrok URL normally changes each time the tunnel is started, so update
+the ESP32 firmware/configuration with the newly printed HTTPS URL. Any existing
+endpoint is exposed at the same URL, for example
+`https://example.ngrok-free.app/health`; authenticated `/api/*` read endpoints
+continue to require their existing Firebase Bearer token.
+
+The telemetry route is intentionally separate from the authenticated dashboard
+routes so a device can post directly. Treat the tunnel URL as a public ingress
+address: use ngrok access controls or an application-level device credential
+before deploying it beyond development.
+
+### Simulate ESP32 HTTP telemetry through ngrok
+
+With Uvicorn and `ngrok http 8000` running, send five simulated readings to the
+public HTTPS endpoint:
+
+```bash
+cd backend
+source .venv/bin/activate
+python3 scripts/simulate_sensor_ngrok.py \
+  --url https://example.ngrok-free.app \
+  --count 5 --interval 2
+```
+
+The script uses only the Python standard library and accepts either the ngrok
+base URL or the full `/api/telemetry` URL. It does not read, store, or require
+an ngrok authtoken. Add hardware diagnostics when needed:
+
+```bash
+python3 scripts/simulate_sensor_ngrok.py \
+  --url https://example.ngrok-free.app/api/telemetry \
+  --hardware-status 0 0 0 0
+```
+
+### 6) Simulate sensor readings (end-to-end testing)
 
 If you don’t have ESP32 hardware connected yet, you can publish simulated sensor readings to MQTT.
 The backend will ingest them into InfluxDB, the frontend will update live metrics, and the scheduler can generate predictions/alerts.

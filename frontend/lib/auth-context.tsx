@@ -15,9 +15,9 @@ import {
   signInWithEmailAndPassword,
 } from "firebase/auth";
 import { auth, googleProvider } from "./firebase";
+import { API_BASE, apiHeaders } from "./api-config";
 import { useRouter } from "next/navigation";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const REDIRECT_TARGET_KEY = "auth-redirect-target";
 
 const persistRedirectTarget = (target: "admin" | "customer" | null) => {
@@ -80,9 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const token = await firebaseUser.getIdToken();
       localStorage.setItem("firebase-token", token);
       const response = await fetch(`${API_BASE}/auth/me`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: apiHeaders(token),
       });
 
       if (response.ok) {
@@ -126,9 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const token = await result.user.getIdToken();
     localStorage.setItem("firebase-token", token);
     const response = await fetch(`${API_BASE}/auth/me`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: apiHeaders(token),
     });
 
     if (!response.ok) {
@@ -150,9 +146,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("firebase-token", token);
 
     await fetch(`${API_BASE}/auth/me`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: apiHeaders(token),
     });
 
     const nextRole = targetRole === "admin" ? "admin" : "customer";

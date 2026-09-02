@@ -15,6 +15,7 @@ import {
   User,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { API_BASE, apiHeaders } from "@/lib/api-config";
 
 interface Customer {
   id: string;
@@ -56,8 +57,8 @@ export default function AdminCustomersPage() {
     }
 
     setFetching(true);
-    fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/admin/customers`, {
-      headers: { Authorization: `Bearer ${token}` },
+    fetch(`${API_BASE}/admin/customers`, {
+      headers: apiHeaders(token),
     })
       .then(async (res) => {
         if (res.status === 401 || res.status === 403) {
@@ -90,13 +91,10 @@ export default function AdminCustomersPage() {
     setCreating(true);
     try {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/admin/customers`,
+        `${API_BASE}/admin/customers`,
         {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
+          headers: apiHeaders(token, true),
           body: JSON.stringify({
             name: newCustomerName.trim(),
             email: newCustomerEmail.trim(),

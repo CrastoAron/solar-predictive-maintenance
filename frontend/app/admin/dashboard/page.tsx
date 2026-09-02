@@ -12,6 +12,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { API_BASE, apiHeaders } from "@/lib/api-config";
 
 interface Customer {
   id: string;
@@ -45,8 +46,8 @@ export default function AdminDashboardPage() {
       return;
     }
 
-    fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/admin/customers`, {
-      headers: { Authorization: `Bearer ${token}` },
+    fetch(`${API_BASE}/admin/customers`, {
+      headers: apiHeaders(token),
     })
       .then((res) => {
         if (res.status === 401 || res.status === 403) {

@@ -57,7 +57,19 @@ Use this sketch when collecting a local sensor dataset without requiring Wi-Fi, 
 
 ### `solar_monitor`
 
-Use this sketch on the real deployed panel. It reads the connected sensors, publishes telemetry to MQTT, prints diagnostic output, and enters deep sleep for ten minutes. The hardware-status object reports the runtime health of the four supported sensors.
+Use this sketch on the real deployed panel. It reads the connected sensors, publishes telemetry to MQTT by default, prints diagnostic output, and enters deep sleep for ten minutes. The hardware-status object reports the runtime health of the four supported sensors.
+
+To send directly to the FastAPI backend through ngrok instead, open
+`solar_monitor.ino` and set:
+
+```cpp
+#define USE_NGROK_HTTPS true
+#define NGROK_TELEMETRY_URL "https://your-ngrok-domain.ngrok-free.app/api/telemetry"
+```
+
+Start the backend and tunnel first (`uvicorn main:app --reload --host 0.0.0.0 --port 8000`, then `ngrok http 8000`), and copy the current HTTPS forwarding URL. MQTT code remains in the sketch and is used whenever `USE_NGROK_HTTPS` is `false`. ngrok URLs can change between tunnel sessions, so update the URL before uploading when necessary. The sketch never needs an ngrok authtoken.
+
+The development HTTPS implementation uses `WiFiClientSecure::setInsecure()` because the ESP32 Arduino core does not include a maintained root certificate store. The payload is encrypted in transit, but the server certificate is not verified; use `setCACert()` with an appropriate current CA certificate before a production deployment.
 
 ### `solar_monitor_test`
 

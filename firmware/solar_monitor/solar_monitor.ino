@@ -1,5 +1,5 @@
 /*
- * Solar Panel Monitor - ESP32 Night Sleep + MQTT
+ * Solar Panel Monitor - ESP32 Night Sleep + ngrok HTTPS
  *
  * Hardware:
  *   I2C Bus 0 (GPIO 21/22): DS3231 RTC, BH1750, INA219
@@ -10,7 +10,8 @@
 
 #include <Wire.h>
 #include <WiFi.h>
-#include <PubSubClient.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <RTClib.h>
 #include <BH1750.h>
 #include <Adafruit_INA219.h>
@@ -21,13 +22,13 @@
 
 // USER CONFIGURATION
 #define WIFI_SSID       "Batman"
-#define WIFI_PASSWORD   "gothamneedsme"
-#define MQTT_SERVER     "192.168.65.2"
-#define MQTT_PORT       1883
-#define MQTT_USER       ""   // leave "" if none
-#define MQTT_PASSWORD   ""   // leave "" if none
-#define MQTT_CLIENT_ID  "solar_monitor_01"
-#define MQTT_TOPIC      "solar/sensors"
+#define WIFI_PASSWORD   "12345679"
+#define DEVICE_ID       "esp32-01"
+
+#define USE_NGROK_HTTPS true
+// Copy the current HTTPS forwarding URL printed by `ngrok http 8000` and add
+// `/api/telemetry`. Do not put an ngrok authtoken in this sketch.
+#define NGROK_TELEMETRY_URL "https://chain-quarters-thread.ngrok-free.dev/api/telemetry"
 
 
 // TIMING
@@ -35,13 +36,19 @@
 #define uS_TO_MIN       (60ULL * 1000000ULL)
 #define NIGHT_SLEEP_DURATION (NIGHT_SLEEP_MINUTES * uS_TO_MIN)
 #define DAYLIGHT_THRESHOLD_LUX 5.0f
-#define NIGHT_START_HOUR 20
+#define NIGHT_START_HOUR 22
 #define NIGHT_END_HOUR 6
-#define PUBLISH_INTERVAL_MS (10UL * 60UL * 1000UL)
+#define PUBLISH_INTERVAL_MS (1UL * 60UL * 100UL)
 #define SENSOR_CHECK_INTERVAL_MS 10000UL
+#define BME280_READ_RETRIES 3
+#define BME280_INIT_RETRIES 3
+#define SENSOR_READ_RETRIES 3
+#define SENSOR_SETTLE_DELAY_MS 100UL
+#define BME280_STARTUP_DELAY_MS 500UL
+#define SENSOR_BOOT_WAIT_MS 2000UL
 
 #define NTP_SERVER      "pool.ntp.org"
-#define UTC_OFFSET_SEC  0
+#define UTC_OFFSET_SEC  19800
 #define DAYLIGHT_OFFSET_SEC 0
 
 
@@ -61,11 +68,8 @@ BH1750            lightMeter;
 Adafruit_INA219   ina219;
 Adafruit_BME280   bme;
 
-WiFiClient        wifiClient;
-PubSubClient      mqttClient(wifiClient);
-
 // HARDWARE DIAGNOSTICS
-// These numeric values are sent in every MQTT telemetry payload.
+// These numeric values are sent in every telemetry payload.
 enum HardwareStatusCode : uint8_t {
   STATUS_OK = 0,
   STATUS_INITIALIZATION_FAILED = 1,
@@ -97,6 +101,7 @@ bool bme280ReadThisCycle = false;
 bool ina219ReadThisCycle = false;
 bool bh1750ReadThisCycle = false;
 bool ds3231ReadThisCycle = false;
+uint8_t bme280Address = 0;
 
 
 // SENSOR DATA STRUCT
@@ -115,8 +120,8 @@ struct SensorData {
 bool    initSensors();
 bool    readSensors(SensorData &data);
 bool    connectWiFi();
-bool    connectMQTT();
 bool    publishData(const SensorData &data);
+bool    publishDataToNgrok(const String &payload);
 bool    syncRtcFromNtp();
 bool    isNightTime(const DateTime &time);
 bool    shouldSleepAtNight(const SensorData &data);
@@ -129,6 +134,13 @@ void    printHardwareStatus();
 void    setHardwareStatus(const char *device, uint8_t &status, uint8_t nextStatus);
 bool    isValidRtcTime(const DateTime &time);
 bool    isI2CDeviceResponsive(TwoWire &bus, uint8_t address);
+bool    initializeBme280();
+bool    readBme280(float &temperature, float &humidity);
+bool    initializeIna219();
+bool    readIna219(float &voltage, float &current);
+bool    initializeBh1750();
+bool    readBh1750(float &light);
+bool    readRtcTimestamp(char *timestamp, size_t timestampSize);
 unsigned long lastPublishTime = 0;
 unsigned long lastSensorCheckTime = 0;
 
@@ -147,19 +159,23 @@ void setup() {
   I2C_1.setClock(100000);
   delay(500);
 
+  Serial.printf("[Startup] Waiting %lu ms for sensors to initialize after reset...\n",
+                (unsigned long)SENSOR_BOOT_WAIT_MS);
+  delay(SENSOR_BOOT_WAIT_MS);
+
   SensorData data;
 
   initSensors();
-
-  mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
-  mqttClient.setBufferSize(512);
 
   if (!connectWiFi()) {
     Serial.println(F("[ERROR] WiFi failed. Will retry."));
     return;
   }
 
-  syncRtcFromNtp();
+  if (ds3231Ready && (rtc.lostPower() || !isValidRtcTime(rtc.now()))) {
+    Serial.println(F("[Time] RTC time invalid or lost; fetching from NTP on boot."));
+    syncRtcFromNtp();
+  }
 
   // A failed sensor is diagnostic information, not a reason to prevent the
   // remaining healthy sensors from publishing telemetry.
@@ -169,11 +185,6 @@ void setup() {
     Serial.println(F("[Night] Night schedule detected. Entering deep sleep."));
     shutdownPeripherals();
     goToNightSleep();
-    return;
-  }
-
-  if (!connectMQTT()) {
-    Serial.println(F("[ERROR] MQTT failed. Will retry."));
     return;
   }
 
@@ -199,12 +210,6 @@ void loop() {
     syncRtcFromNtp();
   }
 
-  if (!mqttClient.connected()) {
-    connectMQTT();
-  } else {
-    mqttClient.loop();
-  }
-
   if (now - lastSensorCheckTime < SENSOR_CHECK_INTERVAL_MS) {
     return;
   }
@@ -220,7 +225,7 @@ void loop() {
     return;
   }
 
-  if (mqttClient.connected() && now - lastPublishTime >= PUBLISH_INTERVAL_MS) {
+  if (now - lastPublishTime >= PUBLISH_INTERVAL_MS) {
     if (publishData(data)) {
       Serial.println(F("[OK] Data published."));
     } else {
@@ -250,38 +255,184 @@ bool initSensors() {
   }
 
   // INA219 (I2C Bus 0, default address 0x40)
-  if (!ina219.begin(&I2C_0)) {
-    Serial.println(F("[ERROR] INA219 not found"));
-    setHardwareStatus("INA219", hardwareStatus.ina219, STATUS_DEVICE_NOT_FOUND);
-  } else {
-    ina219Ready = true;
-    Serial.println(F("[OK] INA219 initialized"));
-    setHardwareStatus("INA219", hardwareStatus.ina219, STATUS_OK);
-  }
+  ina219Ready = initializeIna219();
 
   // BH1750 (I2C Bus 0)
-  if (!lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE, 0x23, &I2C_0)) {
-    Serial.println(F("[ERROR] BH1750 not found"));
-    setHardwareStatus("BH1750", hardwareStatus.bh1750, STATUS_DEVICE_NOT_FOUND);
-  } else {
-    bh1750Ready = true;
-    Serial.println(F("[OK] BH1750 initialized"));
-    setHardwareStatus("BH1750", hardwareStatus.bh1750, STATUS_OK);
-  }
+  bh1750Ready = initializeBh1750();
 
   // BME280 (I2C Bus 1; try both supported addresses)
-  if (!bme.begin(0x77, &I2C_1) && !bme.begin(0x76, &I2C_1)) {
-    Serial.println(F("[ERROR] BME280 not found"));
-    setHardwareStatus("BME280", hardwareStatus.bme280, STATUS_DEVICE_NOT_FOUND);
-  } else {
-    bme280Ready = true;
-    delay(300);
-    Serial.println(F("[OK] BME280 initialized"));
-    setHardwareStatus("BME280", hardwareStatus.bme280, STATUS_OK);
-  }
+  bme280Ready = initializeBme280();
 
   printHardwareStatus();
   return bme280Ready || ina219Ready || bh1750Ready || ds3231Ready;
+}
+
+bool initializeBme280() {
+  bme280Ready = false;
+  bme280Address = 0;
+
+  for (uint8_t attempt = 0; attempt < BME280_INIT_RETRIES; ++attempt) {
+    delay(BME280_STARTUP_DELAY_MS);
+    if (bme.begin(0x77, &I2C_1)) {
+      bme280Address = 0x77;
+    } else if (bme.begin(0x76, &I2C_1)) {
+      bme280Address = 0x76;
+    }
+
+    if (bme280Address != 0) {
+      bme280Ready = true;
+      delay(300);
+      Serial.println(F("[OK] BME280 initialized"));
+      setHardwareStatus("BME280", hardwareStatus.bme280, STATUS_OK);
+      return true;
+    }
+
+    Serial.printf("[WARN] BME280 initialization failed (attempt %u/%u)\n",
+      attempt + 1, BME280_INIT_RETRIES);
+    delay(100);
+  }
+
+  Serial.println(F("[ERROR] BME280 not found"));
+  setHardwareStatus("BME280", hardwareStatus.bme280, STATUS_DEVICE_NOT_FOUND);
+  return false;
+}
+
+bool initializeIna219() {
+  ina219Ready = false;
+  for (uint8_t attempt = 0; attempt < SENSOR_READ_RETRIES; ++attempt) {
+    if (ina219.begin(&I2C_0)) {
+      ina219Ready = true;
+      Serial.println(F("[OK] INA219 initialized"));
+      setHardwareStatus("INA219", hardwareStatus.ina219, STATUS_OK);
+      return true;
+    }
+    delay(SENSOR_SETTLE_DELAY_MS);
+  }
+
+  Serial.println(F("[ERROR] INA219 not found"));
+  setHardwareStatus("INA219", hardwareStatus.ina219, STATUS_DEVICE_NOT_FOUND);
+  return false;
+}
+
+bool initializeBh1750() {
+  bh1750Ready = false;
+  for (uint8_t attempt = 0; attempt < SENSOR_READ_RETRIES; ++attempt) {
+    if (lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE, 0x23, &I2C_0)) {
+      bh1750Ready = true;
+      Serial.println(F("[OK] BH1750 initialized"));
+      setHardwareStatus("BH1750", hardwareStatus.bh1750, STATUS_OK);
+      return true;
+    }
+    delay(SENSOR_SETTLE_DELAY_MS);
+  }
+
+  Serial.println(F("[ERROR] BH1750 not found"));
+  setHardwareStatus("BH1750", hardwareStatus.bh1750, STATUS_DEVICE_NOT_FOUND);
+  return false;
+}
+
+bool readBme280(float &temperature, float &humidity) {
+  for (uint8_t attempt = 0; attempt < BME280_READ_RETRIES; ++attempt) {
+    if (bme280Address == 0 || !isI2CDeviceResponsive(I2C_1, bme280Address)) {
+      Serial.println(F("[ERROR] BME280 I2C communication failed"));
+      setHardwareStatus("BME280", hardwareStatus.bme280, STATUS_READ_ERROR);
+    } else {
+      temperature = bme.readTemperature();
+      humidity = bme.readHumidity();
+
+      if (isfinite(temperature) && isfinite(humidity) &&
+          temperature >= -40.0f && temperature <= 85.0f &&
+          humidity >= 0.0f && humidity <= 100.0f) {
+        return true;
+      }
+
+      Serial.println(F("[ERROR] BME280 returned invalid data"));
+      setHardwareStatus("BME280", hardwareStatus.bme280, STATUS_INVALID_DATA);
+    }
+
+    if (attempt + 1 < BME280_READ_RETRIES) {
+      Serial.println(F("[WARN] Reinitializing BME280 and retrying"));
+      if (!initializeBme280()) {
+        setHardwareStatus("BME280", hardwareStatus.bme280, STATUS_READ_ERROR);
+      }
+    }
+  }
+
+  bme280Ready = false;
+  setHardwareStatus("BME280", hardwareStatus.bme280, STATUS_READ_ERROR);
+  return false;
+}
+
+bool readIna219(float &voltage, float &current) {
+  for (uint8_t attempt = 0; attempt < SENSOR_READ_RETRIES; ++attempt) {
+    if (ina219Ready && isI2CDeviceResponsive(I2C_0, 0x40)) {
+      voltage = ina219.getBusVoltage_V();
+      current = ina219.getCurrent_mA() / 1000.0f;
+      if (isfinite(voltage) && isfinite(current) &&
+          voltage >= 0.0f && voltage <= 32.0f &&
+          current >= -10.0f && current <= 10.0f) {
+        return true;
+      }
+      setHardwareStatus("INA219", hardwareStatus.ina219, STATUS_INVALID_DATA);
+    } else {
+      setHardwareStatus("INA219", hardwareStatus.ina219, STATUS_READ_ERROR);
+    }
+
+    if (attempt + 1 < SENSOR_READ_RETRIES) {
+      delay(SENSOR_SETTLE_DELAY_MS);
+      ina219Ready = initializeIna219();
+    }
+  }
+
+  ina219Ready = false;
+  setHardwareStatus("INA219", hardwareStatus.ina219, STATUS_READ_ERROR);
+  return false;
+}
+
+bool readBh1750(float &light) {
+  for (uint8_t attempt = 0; attempt < SENSOR_READ_RETRIES; ++attempt) {
+    if (bh1750Ready && isI2CDeviceResponsive(I2C_0, 0x23)) {
+      if (!lightMeter.measurementReady(true)) {
+        delay(200);
+      }
+      delay(SENSOR_SETTLE_DELAY_MS);
+      light = lightMeter.readLightLevel();
+      if (isfinite(light) && light >= 0.0f && light <= 120000.0f) {
+        return true;
+      }
+      setHardwareStatus("BH1750", hardwareStatus.bh1750, STATUS_INVALID_DATA);
+    } else {
+      setHardwareStatus("BH1750", hardwareStatus.bh1750, STATUS_READ_ERROR);
+    }
+
+    if (attempt + 1 < SENSOR_READ_RETRIES) {
+      delay(SENSOR_SETTLE_DELAY_MS);
+      bh1750Ready = initializeBh1750();
+    }
+  }
+
+  bh1750Ready = false;
+  setHardwareStatus("BH1750", hardwareStatus.bh1750, STATUS_READ_ERROR);
+  return false;
+}
+
+bool readRtcTimestamp(char *timestamp, size_t timestampSize) {
+  for (uint8_t attempt = 0; attempt < SENSOR_READ_RETRIES; ++attempt) {
+    if (ds3231Ready && isI2CDeviceResponsive(I2C_0, 0x68)) {
+      DateTime now = rtc.now();
+      if (isValidRtcTime(now) && !rtc.lostPower()) {
+        snprintf(timestamp, timestampSize,
+                 "%04d-%02d-%02d %02d:%02d",
+                 now.year(), now.month(), now.day(),
+                 now.hour(), now.minute());
+        return true;
+      }
+    }
+    setHardwareStatus("DS3231", hardwareStatus.ds3231, STATUS_READ_ERROR);
+    delay(SENSOR_SETTLE_DELAY_MS);
+  }
+
+  return false;
 }
 
 
@@ -292,8 +443,8 @@ bool readSensors(SensorData &data) {
   ina219ReadThisCycle = false;
   bh1750ReadThisCycle = false;
   ds3231ReadThisCycle = false;
-  // Use numeric fallbacks so the existing MQTT fields remain present even
-  // when one peripheral is unavailable. hardware_status identifies the fault.
+  // Use numeric fallbacks so the payload remains complete even when one
+  // peripheral is unavailable. hardware_status identifies the fault.
   data.voltage = 0.0f;
   data.current = 0.0f;
   data.temperature = 0.0f;
@@ -301,63 +452,15 @@ bool readSensors(SensorData &data) {
   data.light = 0.0f;
   snprintf(data.timestamp, sizeof(data.timestamp), "1970-01-01 00:00");
 
-  // RTC timestamp
-  if (ds3231Ready) {
-    if (!isI2CDeviceResponsive(I2C_0, 0x68)) {
-      Serial.println(F("[ERROR] DS3231 I2C communication failed"));
-      setHardwareStatus("DS3231", hardwareStatus.ds3231, STATUS_READ_ERROR);
-    } else {
-      DateTime now = rtc.now();
-      if (isValidRtcTime(now)) {
-        snprintf(data.timestamp, sizeof(data.timestamp),
-                 "%04d-%02d-%02d %02d:%02d",
-                 now.year(), now.month(), now.day(),
-                 now.hour(), now.minute());
-        ds3231ReadThisCycle = true;
-      } else {
-        Serial.println(F("[ERROR] DS3231 returned an invalid timestamp"));
-        setHardwareStatus("DS3231", hardwareStatus.ds3231, STATUS_READ_ERROR);
-      }
-    }
-  }
+  ds3231ReadThisCycle = readRtcTimestamp(data.timestamp, sizeof(data.timestamp));
+  ina219ReadThisCycle = readIna219(data.voltage, data.current);
+  bh1750ReadThisCycle = readBh1750(data.light);
 
-  // INA219: Voltage & Current
-  if (ina219Ready) {
-    if (!isI2CDeviceResponsive(I2C_0, 0x40)) {
-      Serial.println(F("[ERROR] INA219 I2C communication failed"));
-      setHardwareStatus("INA219", hardwareStatus.ina219, STATUS_READ_ERROR);
-    } else {
-      data.voltage = ina219.getBusVoltage_V();
-      data.current = ina219.getCurrent_mA() / 1000.0f;   // Convert to Amps
-      ina219ReadThisCycle = true;
-    }
+  if (!bme280Ready) {
+    bme280Ready = initializeBme280();
   }
-
-  // BH1750: Light
-  if (bh1750Ready) {
-    if (!isI2CDeviceResponsive(I2C_0, 0x23)) {
-      Serial.println(F("[ERROR] BH1750 I2C communication failed"));
-      setHardwareStatus("BH1750", hardwareStatus.bh1750, STATUS_READ_ERROR);
-    } else {
-      if (!lightMeter.measurementReady(true)) {
-        Serial.println(F("[WARN] BH1750 measurement not ready; waiting"));
-        delay(200);   // Wait for measurement to complete
-      }
-      data.light = lightMeter.readLightLevel();
-      bh1750ReadThisCycle = true;
-    }
-  }
-
-  // BME280: Temperature & Humidity
   if (bme280Ready) {
-    if (!isI2CDeviceResponsive(I2C_1, 0x76)) {
-      Serial.println(F("[ERROR] BME280 I2C communication failed"));
-      setHardwareStatus("BME280", hardwareStatus.bme280, STATUS_READ_ERROR);
-    } else {
-      data.temperature = bme.readTemperature();
-      data.humidity    = bme.readHumidity();
-      bme280ReadThisCycle = true;
-    }
+    bme280ReadThisCycle = readBme280(data.temperature, data.humidity);
   }
 
   validateSensorReadings(data);
@@ -463,11 +566,8 @@ bool syncRtcFromNtp() {
     return false;
   }
 
-  DateTime rtcTime = rtc.now();
-  if (isValidRtcTime(rtcTime) && !rtc.lostPower()) {
-    return true;
-  }
-
+  // Force a fresh RTC correction every time the ESP32 boots so the clock is
+  // reset from NTP instead of trusting the previous in-memory RTC state.
   configTime(UTC_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
   struct tm timeinfo;
   Serial.print(F("[Time] Synchronizing RTC with NTP"));
@@ -504,7 +604,8 @@ bool shouldSleepAtNight(const SensorData &data) {
   }
 
   // If the RTC cannot be trusted, use the light sensor as a safe fallback.
-  return bh1750Ready && data.light < DAYLIGHT_THRESHOLD_LUX;
+  return bh1750ReadThisCycle && isfinite(data.light) &&
+    data.light < DAYLIGHT_THRESHOLD_LUX;
 }
 
 bool isI2CDeviceResponsive(TwoWire &bus, uint8_t address) {
@@ -538,40 +639,21 @@ bool connectWiFi() {
   return true;
 }
 
-// MQTT CONNECTION
-bool connectMQTT() {
-  const uint8_t MAX_RETRIES = 3;
-
-  for (uint8_t i = 0; i < MAX_RETRIES; i++) {
-    Serial.printf("[MQTT] Connecting (attempt %d)...\n", i + 1);
-
-    bool connected = (strlen(MQTT_USER) > 0)
-      ? mqttClient.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASSWORD)
-      : mqttClient.connect(MQTT_CLIENT_ID);
-
-    if (connected) {
-      Serial.println(F("[MQTT] Connected"));
-      return true;
-    }
-
-    Serial.printf("[MQTT] Failed, rc=%d\n", mqttClient.state());
-    delay(1000);
-  }
-
-  return false;
-}
-
 // JSON BUILDER
 String buildJSON(const SensorData &data) {
-  // Nested diagnostics require more room than the original flat payload.
-  StaticJsonDocument<384> doc;
+  // Diagnostics plus the backend-compatible device_id and lux fields need
+  // more capacity than the original flat payload format.
+  StaticJsonDocument<512> doc;
 
+  doc["device_id"]   = DEVICE_ID;
   doc["timestamp"]   = data.timestamp;
   doc["voltage"]     = serialized(String(data.voltage, 3));
   doc["current"]     = serialized(String(data.current, 4));
   doc["temperature"] = serialized(String(data.temperature, 2));
   doc["humidity"]    = serialized(String(data.humidity, 2));
   doc["light"]       = serialized(String(data.light, 1));
+  // `lux` is the backend ingestion field; keep `light` above for compatibility.
+  doc["lux"]         = serialized(String(data.light, 1));
   updateHardwareStatus();
   appendHardwareStatus(doc);
 
@@ -580,23 +662,51 @@ String buildJSON(const SensorData &data) {
   return payload;
 }
 
-// MQTT PUBLISH
+// HTTPS POST THROUGH NGROK
 bool publishData(const SensorData &data) {
   String payload = buildJSON(data);
+  return publishDataToNgrok(payload);
+}
 
-  Serial.printf("[MQTT] Publishing: %s\n", payload.c_str());
+bool publishDataToNgrok(const String &payload) {
+  const String endpoint = NGROK_TELEMETRY_URL;
+  if (!endpoint.startsWith("https://") || endpoint.indexOf("YOUR-NGROK-DOMAIN") >= 0) {
+    Serial.println(F("[HTTPS] Set NGROK_TELEMETRY_URL before enabling USE_NGROK_HTTPS."));
+    return false;
+  }
 
-  return mqttClient.publish(MQTT_TOPIC, payload.c_str(), true);
+  WiFiClientSecure secureClient;
+  // ngrok uses a publicly trusted, rotating TLS certificate. ESP32 Arduino
+  // sketches do not ship a root store, so this development configuration skips
+  // certificate verification. For production, replace this with setCACert().
+  secureClient.setInsecure();
+
+  HTTPClient http;
+  http.setTimeout(15000);
+  if (!http.begin(secureClient, endpoint)) {
+    Serial.println(F("[HTTPS] Could not start request."));
+    return false;
+  }
+
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Accept", "application/json");
+  Serial.printf("[HTTPS] POST %s\n", endpoint.c_str());
+  int statusCode = http.POST(payload);
+  String response = http.getString();
+  http.end();
+
+  if (statusCode >= 200 && statusCode < 300) {
+    Serial.printf("[HTTPS] Success, status=%d response=%s\n", statusCode, response.c_str());
+    return true;
+  }
+
+  Serial.printf("[HTTPS] Failed, status=%d response=%s\n", statusCode, response.c_str());
+  return false;
 }
 
 // ShutDown Peripherals
 void shutdownPeripherals() {
   Serial.flush();
-
-  if (mqttClient.connected()) {
-    mqttClient.disconnect();
-    delay(100);
-  }
 
   WiFi.disconnect(true);   
   WiFi.mode(WIFI_OFF);

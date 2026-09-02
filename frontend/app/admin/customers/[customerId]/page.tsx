@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { API_BASE, apiHeaders } from "@/lib/api-config";
 
 interface PanelConfig {
   id: string;
@@ -89,9 +90,9 @@ export default function CustomerConfigPage() {
     setFetching(true);
     try {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/admin/customers/${params.customerId}`,
+        `${API_BASE}/admin/customers/${params.customerId}`,
         {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: apiHeaders(token),
         }
       );
       if (res.status === 401 || res.status === 403) {
@@ -129,13 +130,10 @@ export default function CustomerConfigPage() {
     setAddingPanel(true);
     try {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/admin/customers/${params.customerId}/panels`,
+        `${API_BASE}/admin/customers/${params.customerId}/panels`,
         {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
+          headers: apiHeaders(token, true),
           body: JSON.stringify({
             name: newPanelName.trim() || `Solar Panel #${panels.length + 1}`,
             esp32_id: newEsp32Id.trim() || `esp32-0${panels.length + 1}`,
@@ -177,13 +175,10 @@ export default function CustomerConfigPage() {
     setSavingPanel(true);
     try {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/admin/panels/${selectedPanel.id}`,
+        `${API_BASE}/admin/panels/${selectedPanel.id}`,
         {
           method: "PUT",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
+          headers: apiHeaders(token, true),
           body: JSON.stringify({
             name: selectedPanel.name,
             esp32_id: selectedPanel.esp32_id || "",
@@ -219,10 +214,10 @@ export default function CustomerConfigPage() {
 
     try {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/admin/panels/${panelId}`,
+        `${API_BASE}/admin/panels/${panelId}`,
         {
           method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
+          headers: apiHeaders(token),
         }
       );
       if (res.ok) {

@@ -17,6 +17,14 @@ MQTT_PORT: int = int(_getenv("MQTT_PORT", "1883"))  # e.g. 1883
 MQTT_TOPIC: str = _getenv("MQTT_TOPIC", "solar/sensors")  # hardware topic
 MQTT_QOS: int = int(_getenv("MQTT_QOS", "1"))
 
+# The deployed ESP32 formats RTC time without a UTC offset. Its firmware uses
+# UTC_OFFSET_SEC=19800 (Asia/Kolkata), so legacy naive timestamps must be
+# converted before they are written to InfluxDB. RFC3339 timestamps with `Z`
+# or an explicit offset are unaffected.
+ESP32_NAIVE_TIMESTAMP_UTC_OFFSET_MINUTES: int = int(
+    _getenv("ESP32_NAIVE_TIMESTAMP_UTC_OFFSET_MINUTES", "330")
+)
+
 
 # InfluxDB 2.x
 INFLUX_URL: str | None = _getenv("INFLUX_URL")

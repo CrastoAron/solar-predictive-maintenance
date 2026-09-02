@@ -43,6 +43,15 @@ const colorMap = {
   },
 };
 
+function formatMetricValue(value: number): string {
+  if (value === 0 || Number.isInteger(value)) return value.toFixed(0);
+
+  const magnitude = Math.abs(value);
+  if (magnitude < 0.01) return value.toFixed(4);
+  if (magnitude < 1) return value.toFixed(3);
+  return value.toFixed(2);
+}
+
 export default function MetricCard({
   label,
   value,
@@ -74,7 +83,7 @@ export default function MetricCard({
 
       <div className="flex items-end gap-1.5">
         <span className={`text-3xl font-bold ${c.value} leading-none`}>
-          {typeof value === "number" ? value.toFixed(value % 1 === 0 ? 0 : 1) : value}
+          {typeof value === "number" ? formatMetricValue(value) : value}
         </span>
         {unit && <span className="text-slate-400 text-sm mb-0.5">{unit}</span>}
       </div>

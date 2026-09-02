@@ -1,7 +1,7 @@
 import { auth } from "./firebase";
 import { signOut } from "firebase/auth";
+import { API_BASE, apiHeaders } from "./api-config";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === "true";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -97,10 +97,9 @@ async function apiFetch<T>(path: string): Promise<T> {
     if (!token) throw new Error("No auth token");
 
     const res = await fetch(API_BASE + path, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
+      headers: apiHeaders(token, true),
+      // Telemetry must never come from a browser or intermediary cache.
+      cache: "no-store",
     });
 
     if (res.status === 401) {
