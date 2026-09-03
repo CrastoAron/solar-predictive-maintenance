@@ -1,0 +1,70 @@
+Selected dataset: /home/aron/Projects/solar-predictive-maintenance/model/cleaned_data/cleaned_real_telemetry.csv
+Rows: 2477
+Columns: 10
+
+Column mapping:
+  timestamp: timestamp
+  irradiance: lux
+  temperature: temperature
+  voltage: voltage
+  current: current
+  power: power
+  prediction: [not detected]
+
+Data types:
+timestamp           str
+voltage         float64
+current         float64
+power           float64
+lux             float64
+temperature     float64
+humidity        float64
+source_file         str
+source_row        int64
+quality_flag        str
+
+Missing values:
+timestamp       0
+voltage         0
+current         0
+power           0
+lux             0
+temperature     0
+humidity        0
+source_file     0
+source_row      0
+quality_flag    0
+
+Numerical columns: voltage, current, power, lux, temperature, humidity, source_row
+Categorical/text columns: timestamp, source_file, quality_flag
+
+Numerical statistics:
+           voltage      current        power           lux  temperature     humidity   source_row
+count  2477.000000  2477.000000  2477.000000   2477.000000  2477.000000  2477.000000  2477.000000
+mean      6.919520     0.202491     1.907470  22242.527533    36.005075    62.593504    34.824384
+std       3.378715     0.214038     2.243901  20214.201964     8.500552    24.652616    22.957436
+min       0.152000     0.000000     0.000000      0.000000    17.690000    17.610000     2.000000
+25%       3.440000     0.040000     0.137600   4890.000000    29.710000    42.410000    17.000000
+50%       8.128000     0.110000     0.968160  14880.000000    34.160000    61.840000    32.000000
+75%       9.200000     0.300000     2.763600  42355.000000    43.500000    83.410000    50.000000
+max      19.308000     0.830000     9.189760  54612.500000    54.960000   100.000000   142.000000
+
+Preprocessing decisions:
+- No type-conversion or domain-invalid values were found in detected columns.
+
+Generated graphs:
+- irradiance_vs_power.png
+- temperature_vs_power.png
+- voltage_vs_current.png
+- power_over_time.png
+- irradiance_vs_temperature.png
+- power_distribution.png
+- correlation_heatmap.png
+
+Correlation matrix:
+                  lux  temperature   voltage   current     power
+lux          1.000000     0.808648  0.812378  0.932104  0.925434
+temperature  0.808648     1.000000  0.697434  0.785483  0.773786
+voltage      0.812378     0.697434  1.000000  0.700432  0.690883
+current      0.932104     0.785483  0.700432  1.000000  0.996689
+power        0.925434     0.773786  0.690883  0.996689  1.000000

@@ -1,30 +1,35 @@
-# Expected-Power Baseline
+# Expected-Power Baseline Artifacts
 
-This directory contains the presentation-safe SolarShield baseline trained from the cleaned real ESP32 dataset. It estimates expected daylight power from environmental conditions and time of day; it is not a multi-class fault classifier or a maintenance-days forecast.
+This directory contains the SolarShield expected-power baseline trained from
+cleaned real ESP32 telemetry. It is the runtime model used by the backend's
+`/api/expected-power`, diagnostics, scheduler, and baseline-aware simulator.
 
-## Purpose
+It is not a multi-class fault classifier or a maintenance-days forecast.
 
-The real collected data has no verified labels for partial shading, dust, panel damage, loose wiring, or panel degradation. A fault classifier cannot be validated without those labels. Instead, this model estimates expected power and calculates an underperformance signal:
+## Runtime artifacts
+
+| File | Purpose |
+| --- | --- |
+| `expected_power_model.pkl` | Random Forest regressor used at runtime. |
+| `expected_power_feature_order.json` | Exact input-feature order for inference. |
+| `expected_power_metrics.json` | Held-out metrics and documented limitations. |
+| `expected_power_test_predictions.csv` | Actual versus expected values for the test period. |
+| `expected_power_actual_vs_expected.png` | Presentation chart for the chronological test period. |
+
+## Inputs and output
+
+Inputs are lux, temperature, humidity, and cyclical UTC hour-of-day features.
+Power, voltage, current, and derived efficiency measures are excluded from
+training inputs to prevent target leakage.
+
+The backend derives:
 
 ```text
 performance_ratio = actual_power / expected_power
 ```
 
-| Ratio | Operational status |
-|---:|---|
-| At least 0.80 | Normal |
-| 0.50 to less than 0.80 | Underperforming |
-| Less than 0.50 | Strong anomaly |
-
-These are operational thresholds, not confirmed fault labels. The diagnostics module should use telemetry and hardware status to provide evidence and recommendations.
-
-## Artifacts
-
-- `expected_power_model.pkl` — Random Forest expected-power regressor.
-- `expected_power_feature_order.json` — Required inference feature order.
-- `expected_power_metrics.json` — Reproducible held-out metrics and limitations.
-- `expected_power_test_predictions.csv` — Actual/expected test-period values, residuals, ratios, and operational statuses.
-- `expected_power_actual_vs_expected.png` — Chronological test-period chart for presentation.
+At lux below 5,000, the backend does not run the daylight baseline and returns
+`Not evaluated (low light)` with null expected power and performance ratio.
 
 ## Reproduce
 
@@ -34,11 +39,12 @@ From the repository root:
 backend/.venv/bin/python model/train_expected_power.py
 ```
 
-The script reads `model/cleaned_data/cleaned_real_telemetry.csv`, keeps daylight samples at or above 5,000 lux, and uses an earliest-date 80% training / latest-date 20% test split. Its input features are `lux`, `temperature`, `humidity`, and cyclical hour-of-day features. It deliberately excludes power, voltage, current, and efficiency ratio from model inputs to avoid target leakage.
+The script uses `model/cleaned_data/cleaned_real_telemetry.csv` and an earliest
+80% / latest 20% chronological split by calendar date.
 
-## Limitations
+## Interpretation
 
-- The model is a baseline for expected daytime output, not a proof of panel condition.
-- Low output can result from shading, dust, weather variation, wiring, measurement errors, or other conditions.
-- Runtime inference must apply the same feature engineering and daylight threshold as the training script.
-- Confirmed multi-class fault classification requires controlled or historical fault labels collected in the future.
+The artifacts estimate expected daytime output only. Underperformance can come
+from shading, soiling, weather, wiring, sensor error, or other conditions. The
+diagnostics service must provide the supporting evidence and should report a
+low-output anomaly when no physical cause is confirmed.

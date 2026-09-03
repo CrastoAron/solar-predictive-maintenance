@@ -10,6 +10,8 @@ scikit-learn
 xgboost
 joblib
 matplotlib
+seaborn
+openpyxl
 python-dotenv
 pydantic
 supabase

@@ -1,47 +1,58 @@
-# ESP32 MQTT telemetry simulator
+# ESP32 MQTT Test Telemetry Sketch
 
-`solar_monitor_test.ino` publishes a realistic, continuously changing solar-panel
-sample every five seconds. It has no sensor hardware dependency and is intended to
-exercise the MQTT ingestion, dashboard, and prediction flow.
+`solar_monitor_test.ino` publishes continuously changing simulated solar
+telemetry to the same MQTT topic used by the real monitor. It requires no
+physical sensors and is useful for exercising MQTT ingestion, InfluxDB,
+expected-power status, diagnostics, and the frontend.
 
 ## Configure
 
-Before uploading, edit the configuration block at the top of the sketch:
+Set these values at the top of the sketch before uploading:
 
 - `WIFI_SSID` and `WIFI_PASSWORD`
-- `MQTT_SERVER`: the LAN IP/DNS name of the machine running the MQTT broker. Do
-  not use `localhost`, because on an ESP32 that refers to the ESP32 itself.
-- `MQTT_PORT`, `MQTT_USER`, and `MQTT_PASSWORD` if your broker requires them
-- `MQTT_TOPIC`: must equal backend `MQTT_TOPIC` (default: `solar/sensors`)
-- `DEVICE_ID`: must equal the device selected by the backend/frontend (default:
-  `esp32-01`)
+- `MQTT_SERVER`, `MQTT_PORT`, `MQTT_USER`, and `MQTT_PASSWORD` as needed
+- `MQTT_TOPIC`, normally `solar/sensors`
+- `DEVICE_ID`, normally `esp32-01`
 
-The sketch uses NTP and sends current UTC timestamps, so samples fall within the
-backend's recent-data query window. `SIMULATION_UTC_OFFSET_SEC` controls only the
-fake daylight curve; it is set to India Standard Time (`19800`).
+Do not use `localhost` for `MQTT_SERVER`; on an ESP32 it means the ESP32 itself.
+Use the broker machine's LAN IP address or DNS name instead.
 
-## Arduino libraries
+The sketch uses NTP and publishes UTC timestamps. `SIMULATION_UTC_OFFSET_SEC`
+only controls the simulated daylight curve.
 
-Install these through Arduino IDE Library Manager (or `arduino-cli lib install`):
+## Libraries
+
+Install these libraries with Arduino Library Manager:
 
 - PubSubClient
 - ArduinoJson
 
-Select an ESP32 board and upload `solar_monitor_test.ino`. The Serial Monitor at
-115200 baud prints each JSON message. A successful sample has this shape:
+Select an ESP32 board, upload the sketch, then open Serial Monitor at 115200
+baud to inspect each MQTT packet.
+
+## Payload
+
+Every packet includes the normal telemetry fields and an explicit all-OK
+hardware status object because this sketch has no physical sensors to read:
 
 ```json
 {
   "device_id": "esp32-01",
-  "timestamp": "2026-07-21T12:34:56Z",
-  "voltage": 13.8,
-  "current": 2.1,
-  "lux": 48000,
+  "timestamp": "2026-09-03T12:34:56Z",
+  "voltage": 8.5,
+  "current": 0.3,
+  "lux": 32000,
   "temperature": 33.4,
-  "humidity": 56.2
+  "humidity": 56.2,
+  "hardware_status": {
+    "bme280": 0,
+    "ina219": 0,
+    "bh1750": 0,
+    "ds3231": 0
+  }
 }
 ```
 
-Start the backend with the same MQTT host/topic. Its subscriber converts the
-sample to a `sensor_data` point in InfluxDB and calculates power as voltage ×
-current.
+The backend calculates power as voltage × current and independently determines
+expected-power status and diagnostics. This sketch does not publish a scenario,
+model result, or fault label.

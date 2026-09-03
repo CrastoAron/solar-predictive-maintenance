@@ -1,29 +1,35 @@
-# Firmware Overview
+# SolarShield ESP32 Firmware
 
-This directory contains the ESP32 firmware used by SolarShield to collect solar-panel and environmental data. Depending on the sketch selected, the ESP32 either stores readings locally, publishes real sensor readings to MQTT, or simulates realistic telemetry for end-to-end testing.
+This directory contains ESP32 sketches for collecting and publishing solar
+telemetry. The real monitor includes hardware diagnostics for the BME280,
+INA219, BH1750, and DS3231.
 
-The supported hardware sensors are:
+## Sketches
 
-- **INA219** for panel voltage and current
-- **BH1750** for light intensity
-- **BME280** for temperature and humidity
-- **DS3231** for timestamping
+| Sketch | Use |
+| --- | --- |
+| [`solar_logger/`](solar_logger/) | Logs sensor data to an SD card for offline collection. |
+| [`solar_monitor/`](solar_monitor/) | Reads connected hardware and sends telemetry to MQTT or FastAPI HTTPS. |
+| [`solar_monitor_test/`](solar_monitor_test/) | Sends simulated MQTT telemetry for integration testing without sensor hardware. |
 
-## Firmware Files
+## Hardware
 
-- [`solar_logger/`](solar_logger/) — Reads the connected sensors and writes timestamped readings to an SD card as `/solar_log.csv`. It is intended for offline data collection.
-- [`solar_monitor/`](solar_monitor/) — Reads live sensor data and publishes it to the SolarShield MQTT backend. It uses deep sleep between measurements and includes hardware diagnostics for the BME280, INA219, BH1750, and DS3231.
-- [`solar_monitor_test/`](solar_monitor_test/) — Publishes realistic simulated solar data to the same MQTT backend. It needs no physical sensors and is intended for backend, database, ML, and frontend testing.
+- INA219: panel voltage and current
+- BH1750: light intensity
+- BME280: temperature and humidity
+- DS3231: timestamp source
 
-## Requirements
+The real monitor uses I2C bus 0 on GPIO 21/22 for DS3231, BH1750, and INA219,
+and I2C bus 1 on GPIO 16/17 for BME280.
 
-- [Arduino IDE](https://www.arduino.cc/en/software)
-- ESP32 board package for Arduino IDE
-- An ESP32 development board
-- Wi-Fi access and an MQTT broker for the MQTT sketches
-- An SD card and SD-card module for `solar_logger`
+## Arduino requirements
 
-Install these libraries through **Arduino IDE → Sketch → Include Library → Manage Libraries**:
+- Arduino IDE with the Espressif ESP32 board package
+- ESP32 development board
+- Wi-Fi and an MQTT broker for MQTT publishing
+- SD card/module for `solar_logger`
+
+Install these libraries through Arduino Library Manager:
 
 - PubSubClient
 - ArduinoJson
@@ -33,64 +39,60 @@ Install these libraries through **Arduino IDE → Sketch → Include Library →
 - Adafruit BME280 Library
 - Adafruit Unified Sensor
 
-`solar_logger` additionally uses the built-in ESP32 `SPI` and `SD` libraries. `solar_monitor_test` uses the built-in `time.h` support for NTP timestamps.
+`solar_logger` also uses built-in ESP32 `SPI` and `SD` support. The test sketch
+uses built-in NTP/time support.
 
 ## Setup
 
 1. Install Arduino IDE and the ESP32 board package.
-   - In **File → Preferences**, add the Espressif board-manager URL if it is not already configured.
-   - In **Tools → Board → Boards Manager**, install **esp32 by Espressif Systems**.
-2. Install the required libraries listed above.
-3. Open the desired `.ino` sketch and configure its Wi-Fi and MQTT settings.
-   - Set `WIFI_SSID` and `WIFI_PASSWORD`.
-   - Set `MQTT_SERVER`, `MQTT_PORT`, and, where required, MQTT credentials.
-   - Keep `MQTT_TOPIC` aligned with the backend topic, normally `solar/sensors`.
-   - For `solar_monitor_test`, set `DEVICE_ID` to the device configured in the backend/frontend.
-4. Connect the ESP32, then select the correct board and COM/serial port in **Tools**.
-5. Upload the desired firmware and open the Serial Monitor at **115200 baud** to verify sensor, Wi-Fi, MQTT, and diagnostics output.
+2. Open the target `.ino` file.
+3. Configure Wi-Fi, `DEVICE_ID`, and the selected transport endpoint/topic.
+4. Select the ESP32 board and serial port.
+5. Upload the sketch and open Serial Monitor at 115200 baud.
 
-## Usage
+Keep `DEVICE_ID` and MQTT topic aligned with backend configuration. The normal
+MQTT topic is `solar/sensors`.
 
-### `solar_logger`
+## Hardware diagnostics
 
-Use this sketch when collecting a local sensor dataset without requiring Wi-Fi, MQTT, InfluxDB, or the backend. It reads the sensors, appends a CSV row to the SD card, then enters deep sleep for ten minutes.
+`solar_monitor` sends this object in each telemetry packet:
 
-### `solar_monitor`
-
-Use this sketch on the real deployed panel. It reads the connected sensors, publishes telemetry to MQTT by default, prints diagnostic output, and enters deep sleep for ten minutes. The hardware-status object reports the runtime health of the four supported sensors.
-
-To send directly to the FastAPI backend through ngrok instead, open
-`solar_monitor.ino` and set:
-
-```cpp
-#define USE_NGROK_HTTPS true
-#define NGROK_TELEMETRY_URL "https://your-ngrok-domain.ngrok-free.app/api/telemetry"
+```json
+"hardware_status": {
+  "bme280": 0,
+  "ina219": 0,
+  "bh1750": 0,
+  "ds3231": 0
+}
 ```
 
-Start the backend and tunnel first (`uvicorn main:app --reload --host 0.0.0.0 --port 8000`, then `ngrok http 8000`), and copy the current HTTPS forwarding URL. MQTT code remains in the sketch and is used whenever `USE_NGROK_HTTPS` is `false`. ngrok URLs can change between tunnel sessions, so update the URL before uploading when necessary. The sketch never needs an ngrok authtoken.
+| Code | Meaning |
+| --- | --- |
+| 0 | OK |
+| 1 | Initialization failed |
+| 2 | Device not found |
+| 3 | Invalid data |
+| 4 | Read error |
+| 5 | Device-specific error |
 
-The development HTTPS implementation uses `WiFiClientSecure::setInsecure()` because the ESP32 Arduino core does not include a maintained root certificate store. The payload is encrypted in transit, but the server certificate is not verified; use `setCACert()` with an appropriate current CA certificate before a production deployment.
+The monitor continues publishing when one sensor fails so the backend can show
+the hardware failure instead of losing all remaining telemetry.
 
-### `solar_monitor_test`
+## Transport options
 
-Use this sketch for demonstrations and integration testing when physical sensors or a solar panel are unavailable. It generates gradual daylight cycles, normal operating values, and occasional abnormal conditions, then publishes a sample every five seconds.
+`solar_monitor` can send either MQTT or direct HTTPS telemetry. Configure
+`USE_NGROK_HTTPS` and `NGROK_TELEMETRY_URL` in the sketch for the HTTPS path.
+The URL must end in `/api/telemetry` and may change each time a free ngrok
+tunnel restarts.
 
-## Project Structure
-
-```text
-firmware/
-├── README.md
-├── solar_logger/
-│   └── solar_logger.ino
-├── solar_monitor/
-│   └── solar_monitor.ino
-└── solar_monitor_test/
-    ├── README.md
-    └── solar_monitor_test.ino
-```
+The development HTTPS implementation uses `WiFiClientSecure::setInsecure()`.
+Traffic is encrypted, but server certificates are not verified. Use a trusted
+CA certificate with `setCACert()` before production deployment.
 
 ## Notes
 
-- `solar_monitor` and `solar_monitor_test` use the same core MQTT telemetry contract and topic, so the backend does not need to change when switching between real and simulated data sources.
-- Keep the device ID, MQTT topic, and broker settings consistent with the backend configuration.
-- Configure credentials locally before uploading. Do not commit Wi-Fi passwords, broker credentials, or other secrets to version control.
+- `solar_monitor` and `solar_monitor_test` use the same core telemetry fields,
+  MQTT topic, and hardware-status schema.
+- Do not commit Wi-Fi passwords, broker credentials, or tunnel URLs.
+- Use `solar_monitor_test` or the backend simulator for dashboard demos when
+  physical hardware is unavailable.

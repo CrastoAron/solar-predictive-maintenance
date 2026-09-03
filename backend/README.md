@@ -1,54 +1,54 @@
-# SolarShield Backend (FastAPI)
+# SolarShield Backend
 
-ML-driven predictive maintenance and efficiency analysis backend for solar panel monitoring.
+The backend is a FastAPI service that receives solar telemetry, writes it to
+InfluxDB, derives expected-power and explainable diagnostic assessments, and
+serves the dashboard and administrator APIs.
 
-## What this backend does
+## Responsibilities
 
-- **Ingests live sensor readings** via MQTT and stores them in **InfluxDB 2.x**
-- **Accepts ESP32 telemetry** over HTTP(S) at `POST /api/telemetry` (including through ngrok)
-- **Captures optional hardware diagnostics** from telemetry payloads and stores them alongside sensor readings
-- **Serves REST APIs** for live values, history charts, predictions, alerts, hardware diagnostics, and maintenance guidance
-- **Runs a background scheduler** that periodically:
-  - pulls last ~30 minutes of sensor data from InfluxDB
-  - computes features
-  - runs ML models to produce predictions
-  - writes predictions + alerts back to InfluxDB
+- Ingest telemetry through MQTT on `MQTT_TOPIC` or unauthenticated HTTPS at
+  `POST /api/telemetry`.
+- Store sensor readings and optional ESP32 `hardware_status` values in InfluxDB.
+- Calculate expected daylight power and operational status.
+- Run deterministic diagnostics from telemetry, history, and hardware status.
+- Run a scheduler that records derived status and alerts for existing dashboard
+  prediction, maintenance, and alert views.
+- Provide Firebase-protected dashboard APIs and Firebase-admin-protected
+  customer/panel management APIs backed by Supabase.
 
-## Tech stack
+## Model and diagnostics
 
-- **API**: FastAPI + Uvicorn (`main.py`)
-- **Auth**: Firebase Admin (Bearer ID token required for `/api/*`)
-- **Storage**: InfluxDB 2.x
-- **Ingestion**: MQTT (Paho client)
-- **Scheduler**: APScheduler (AsyncIO scheduler)
-- **ML runtime**: `joblib`-loaded scikit-learn artifacts (dummy or real)
+The active runtime path is:
 
-## Repository layout (backend)
+```text
+latest telemetry → expected-power baseline → operational status
+recent telemetry + hardware_status + baseline → diagnostics result
+```
 
-- `main.py`: FastAPI app + startup/shutdown lifecycle (starts MQTT + scheduler)
-- `config.py`: environment variables and defaults
-- `dependencies.py`: auth dependency (`get_current_user`)
-- `routers/`: API routes
-- `services/`:
-  - `mqtt_client.py`: subscribes to MQTT topic and writes sensor points to InfluxDB
-  - `influx_client.py`: read/write operations for raw sensor data, predictions, alerts
-  - `feature_eng.py`: feature computation from recent sensor window
-  - `ml_runner.py`: loads ML assets and produces predictions
-  - `scheduler.py`: periodic batch prediction job
-  - `firebase_admin.py`: Firebase token verification
-- `scripts/generate_dummy_models.py`: generates test ML assets for local development
-- `scripts/simulate_sensor.py`: publishes simulated sensor readings to MQTT (for end-to-end testing)
-- `scripts/simulate_sensor_ngrok.py`: posts simulated sensor readings to `POST /api/telemetry` through ngrok HTTPS
-- `ml_models/`: ML assets (created locally; not required to be committed)
+The baseline model is stored in `model/baseline_models/`. It predicts expected
+daylight power from lux, temperature, humidity, and UTC time of day.
+
+| Condition | `operational_status` |
+| --- | --- |
+| Lux below 5,000 | `Not evaluated (low light)` |
+| Ratio at least 0.80 | `Normal` |
+| Ratio from 0.50 to less than 0.80 | `Underperforming` |
+| Ratio below 0.50 | `Strong anomaly` |
+
+Diagnostics are rule-based and explainable. They can report Sensor Failure,
+Partial Shading, Dust Accumulation, Panel Degradation, Possible Panel Damage,
+Loose Wiring, or Low-output anomaly. The final option is intentional: it is
+used when a deviation exists but the telemetry cannot prove a physical cause.
 
 ## Requirements
 
-- Python 3.10+ recommended
-- InfluxDB 2.x reachable from this service
-- MQTT broker reachable from this service (Mosquitto etc.)
-- Firebase service account JSON (for authenticated endpoints)
+- Python 3.10 or later
+- InfluxDB 2.x
+- MQTT broker such as Mosquitto for MQTT ingestion
+- Firebase service-account JSON for authenticated APIs
+- Supabase URL and service-role key for administrator data management
 
-Install Python dependencies:
+Install dependencies:
 
 ```bash
 cd backend
@@ -57,154 +57,28 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Configuration (environment variables)
+## Configuration
 
-### Supabase admin configuration
+Create `backend/.env` from [`.env.example`](.env.example), then set the
+required values.
 
-The admin customer and panel editor persists to Supabase; it is not a frontend-only store.
+| Group | Important variables |
+| --- | --- |
+| InfluxDB | `INFLUX_URL`, `INFLUX_TOKEN`, `INFLUX_ORG`, bucket names |
+| MQTT | `MQTT_HOST`, `MQTT_PORT`, `MQTT_TOPIC`, `MQTT_QOS` |
+| Device defaults | `DEFAULT_DEVICE_ID`, `ESP32_NAIVE_TIMESTAMP_UTC_OFFSET_MINUTES` |
+| Firebase | `FIREBASE_SERVICE_ACCOUNT_PATH`, `FIREBASE_PROJECT_ID` |
+| Supabase admin store | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` |
+| Scheduling | `PREDICTION_BATCH_INTERVAL_SECONDS`, alert thresholds |
+| Baseline | `EXPECTED_POWER_MODEL_PATH`, `EXPECTED_POWER_FEATURES_PATH`, `EXPECTED_POWER_DAYLIGHT_LUX_MIN` |
 
-1. In Supabase, open the target project and choose **SQL Editor**.
-2. Open [`supabase/schema.sql`](supabase/schema.sql) in this repository, copy its contents,
-   and run it in the SQL Editor. It creates `customers`, `panel_arrays`, and `panels`, plus
-   their relationships, indexes, and RLS configuration.
-3. In **Project Settings → API**, copy the project URL and the **service_role** secret key.
-   Do not use the `anon`/publishable key for the backend admin store.
-4. Set these values in `backend/.env` and restart the backend process:
+Never expose `SUPABASE_SERVICE_ROLE_KEY` in frontend code or commit it to the
+repository. Apply [`supabase/schema.sql`](supabase/schema.sql) in the Supabase
+SQL editor before using the admin APIs.
 
-   ```env
-   SUPABASE_URL=https://your-project-ref.supabase.co
-   SUPABASE_SERVICE_ROLE_KEY=your-service-role-secret
-   ```
+## Run locally
 
-`SUPABASE_SERVICE_ROLE_KEY` is server-only—never expose it through `NEXT_PUBLIC_*` values,
-place it in frontend code, or commit it to the repository. The service-role key bypasses the
-RLS policies used to protect browser clients.
-
-Troubleshooting:
-
-- `PGRST205: Could not find the table public.customers`: step 2 was not applied to this
-  Supabase project. Run `supabase/schema.sql` in its SQL Editor.
-- `new row violates row-level security policy`: the backend is using an anon/publishable key.
-  Replace `SUPABASE_SERVICE_ROLE_KEY` with the actual **service_role** key and restart the
-  backend. Do not copy the anon key into both variables.
-- The backend deliberately returns database errors when Supabase is configured but broken;
-  it does not write temporary in-memory customer or panel records in that case.
-
-The backend uses `python-dotenv` to load environment variables. You can export them in your shell or put them in `backend/.env`.
-
-### InfluxDB (required)
-
-- `INFLUX_URL` (required): e.g. `http://localhost:8086`
-- `INFLUX_TOKEN` (required)
-- `INFLUX_ORG` (default: `solar_org`)
-- `INFLUX_BUCKET_RAW` (default: `solar_raw`)
-- `INFLUX_BUCKET_PREDICTIONS` (default: `solar_predictions`)
-- `INFLUX_BUCKET_ALERTS` (default: `solar_alerts`)
-- `INFLUX_LATEST_LOOKBACK` (default: `30d`)
-
-### MQTT (required)
-
-- `MQTT_HOST` (default: `localhost`)
-- `MQTT_PORT` (default: `1883`)
-- `MQTT_TOPIC` (default: `solar/sensors`)
-- `MQTT_QOS` (default: `1`)
-- `ESP32_NAIVE_TIMESTAMP_UTC_OFFSET_MINUTES` (default: `330`): UTC offset for
-  legacy ESP32 timestamps with no `Z` or explicit offset. ISO/RFC3339
-  timestamps that include a timezone are always converted correctly.
-
-### Firebase auth (required for `/api/*`)
-
-- `FIREBASE_SERVICE_ACCOUNT_PATH` (default: `serviceAccountKey.json`)
-- `FIREBASE_PROJECT_ID` (optional): if set, the token audience is validated
-
-### Scheduler + alerts
-
-- `PREDICTION_BATCH_INTERVAL_SECONDS` (default: `300`)
-- `DEFAULT_DEVICE_ID` (default: `esp32-01`)
-- `FAULT_ALERT_MIN_CLASS` (default: `1`)
-- `EFFICIENCY_ALERT_MAX_SCORE` (default: `60`)
-
-### ML assets paths
-
-Defaults (relative to `backend/`):
-
-- `RF_MODEL_PATH` → `backend/ml_models/rf_classifier.pkl`
-- `XGB_MODEL_PATH` → `backend/ml_models/xgb_regressor.pkl`
-- `FEATURES_JSON_PATH` → `backend/ml_models/features.json`
-
-## Running locally
-
-### 1) Start dependencies
-
-# 1. Clean up conflicting networks or containers
-```bash
-docker stop mosquitto 2>/dev/null || true
-docker rm mosquitto 2>/dev/null || true
-docker network rm my_mqtt_net 2>/dev/null || true
-```
-# 2. Build the exact matching bridge subnet mask
-```bash
-docker network create --subnet=192.168.137.0/24 my_mqtt_net
-```
-
-# 3. Spin up the container with volume mapping and static address allocation
-```bash
-docker run -d \
-  --name mosquitto \
-  --network my_mqtt_net \
-  --ip 192.168.137.50 \
-  -p 1883:1883 \
-  -v \$(pwd)/mosquitto.conf:/mosquitto/config/mosquitto.conf \
-  eclipse-mosquitto:2
-```
-
-Start InfluxDB 2.x (example):
-
-```bash
-docker run -d --name influxdb2 -p 8086:8086 \
-  -e DOCKER_INFLUXDB_INIT_MODE=setup \
-  -e DOCKER_INFLUXDB_INIT_USERNAME=admin \
-  -e DOCKER_INFLUXDB_INIT_PASSWORD=adminadmin \
-  -e DOCKER_INFLUXDB_INIT_ORG=solar_org \
-  -e DOCKER_INFLUXDB_INIT_BUCKET=solar_raw \
-  -e DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=solarshield \
-  influxdb:2
-```
-
-Create buckets (if you didn’t already) in the Influx UI:
-
-- `solar_raw`
-- `solar_predictions`
-- `solar_alerts`
-
-### 2) Export env vars
-
-If you have `backend/.env` containing `export ...` lines, you can load it with:
-
-```bash
-cd backend
-source .env
-```
-
-At minimum, ensure you set `INFLUX_URL`, `INFLUX_TOKEN`, and `INFLUX_ORG`.
-
-### 3) (Optional) Generate dummy ML models for testing
-
-If you don’t have real trained models yet, generate dummy assets:
-
-```bash
-cd backend
-source .venv/bin/activate
-python3 scripts/generate_dummy_models.py
-```
-
-This creates:
-
-- `backend/ml_models/features.json`
-- `backend/ml_models/rf_classifier.pkl`
-- `backend/ml_models/xgb_regressor.pkl`
-
-### 4) Start the API server
+Start InfluxDB and Mosquitto, configure `.env`, then run:
 
 ```bash
 cd backend
@@ -212,292 +86,98 @@ source .venv/bin/activate
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Health check (no auth):
+Verify the public health endpoint:
 
 ```bash
 curl http://localhost:8000/health
 ```
 
-### 5) Expose the API to an ESP32 with ngrok HTTPS
+The repository root [`arch_setup.sh`](../arch_setup.sh) can automate the local
+Docker services, application processes, and ngrok tunnel on Arch Linux.
 
-Keep the API server above running, then open a second terminal and run:
+## Telemetry contract
 
-```bash
-ngrok config add-authtoken <YOUR_NGROK_AUTHTOKEN>
-ngrok http 8000
+Both MQTT and `POST /api/telemetry` use the same payload fields:
+
+```json
+{
+  "device_id": "esp32-01",
+  "timestamp": "2026-09-03T12:00:00Z",
+  "voltage": 8.5,
+  "current": 0.3,
+  "lux": 32000,
+  "temperature": 33.0,
+  "humidity": 60.0,
+  "hardware_status": {
+    "bme280": 0,
+    "ina219": 0,
+    "bh1750": 0,
+    "ds3231": 0
+  }
+}
 ```
 
-The first command is needed once per machine. Obtain the token from your ngrok
-account and keep it out of source control; it is stored by the ngrok CLI, not in
-this repository. The second command prints a forwarding address such as
-`https://example.ngrok-free.app`. ngrok terminates HTTPS and forwards requests
-to the existing Uvicorn server at `http://localhost:8000`.
+`power` is calculated as voltage × current before storage. Hardware status
+codes are: `0` OK, `1` initialization failed, `2` device not found, `3` invalid
+data, `4` read error, and `5` device-specific error.
 
-Use that HTTPS address in the ESP32 request URL:
+## APIs
 
-```text
-https://example.ngrok-free.app/api/telemetry
-```
+`GET /health` and `POST /api/telemetry` are public. Dashboard APIs require a
+Firebase Bearer token. Administrator routes require an authenticated Firebase
+user with the admin role.
 
-`POST /api/telemetry` accepts the same JSON telemetry fields used by the MQTT
-subscriber and writes them through the same InfluxDB path. MQTT remains active
-and unchanged, so either transport (or both) can be used.
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/live` | Latest sensor row. |
+| `GET /api/history` | Historical voltage, current, power, lux, temperature, or humidity values. |
+| `GET /api/expected-power` | Actual power, expected power, ratio, and operational status. |
+| `GET /api/diagnostics` | Explainable health, root cause, evidence, confidence, and recommendation. |
+| `GET /api/hardware-status` | Latest BME280, INA219, BH1750, and DS3231 status values. |
+| `GET /api/predictions` | Latest scheduler-derived compatibility record. |
+| `GET /api/alerts` | Recent alerts. |
+| `GET /api/maintenance` | Maintenance view derived from current assessment and alerts. |
+| `/admin/*` | Customer, panel-array, panel, and panel-health management APIs. |
 
-Example request to verify the tunnel:
+## Simulating telemetry
 
-```bash
-curl --request POST https://example.ngrok-free.app/api/telemetry \
-  --header "Content-Type: application/json" \
-  --data '{"device_id":"esp32-01","timestamp":"2026-08-30T12:00:00Z","voltage":18.2,"current":1.4,"lux":45000,"temperature":31.5,"humidity":55.0}'
-```
-
-A successful request returns HTTP `202` with `{"status":"accepted"}`. The
-optional `hardware_status` object must contain integer `bme280`, `ina219`,
-`bh1750`, and `ds3231` values in the range `0..5`.
-
-The free ngrok URL normally changes each time the tunnel is started, so update
-the ESP32 firmware/configuration with the newly printed HTTPS URL. Any existing
-endpoint is exposed at the same URL, for example
-`https://example.ngrok-free.app/health`; authenticated `/api/*` read endpoints
-continue to require their existing Firebase Bearer token.
-
-The telemetry route is intentionally separate from the authenticated dashboard
-routes so a device can post directly. Treat the tunnel URL as a public ingress
-address: use ngrok access controls or an application-level device credential
-before deploying it beyond development.
-
-### Simulate ESP32 HTTP telemetry through ngrok
-
-With Uvicorn and `ngrok http 8000` running, send five simulated readings to the
-public HTTPS endpoint:
+Publish realistic MQTT telemetry using the baseline-aware simulator:
 
 ```bash
 cd backend
 source .venv/bin/activate
-python3 scripts/simulate_sensor_ngrok.py \
-  --url https://example.ngrok-free.app \
-  --count 5 --interval 2
+python scripts/simulate_sensor.py --web
 ```
 
-The script uses only the Python standard library and accepts either the ngrok
-base URL or the full `/api/telemetry` URL. It does not read, store, or require
-an ngrok authtoken. Add hardware diagnostics when needed:
+Open `http://localhost:8765` to change scenario, values, and hardware status.
+The simulator does not send a scenario label; it sends normal telemetry and the
+backend independently evaluates it.
+
+| Mode | Expected dashboard result |
+| --- | --- |
+| `normal` | Normal |
+| `degraded` | Underperforming |
+| `fault` | Strong anomaly |
+| `night` | Not evaluated (low light) |
+
+For a sensor failure test:
 
 ```bash
-python3 scripts/simulate_sensor_ngrok.py \
-  --url https://example.ngrok-free.app/api/telemetry \
-  --hardware-status 0 0 0 0
+python scripts/simulate_sensor.py --mode normal --hardware-status 0 4 0 0
 ```
 
-### 6) Simulate sensor readings (end-to-end testing)
+To post HTTP test telemetry through an ngrok tunnel, use
+`scripts/simulate_sensor_ngrok.py`; see its `--help` output.
 
-If you don’t have ESP32 hardware connected yet, you can publish simulated sensor readings to MQTT.
-The backend will ingest them into InfluxDB, the frontend will update live metrics, and the scheduler can generate predictions/alerts.
-
-Run interactively with prompts:
+## Verification
 
 ```bash
-cd backend
-source .venv/bin/activate
-python3 scripts/simulate_sensor.py
+python -m compileall -q .
+pytest
 ```
 
-Run (mixed normal/degraded/fault samples):
+## Important limitation
 
-```bash
-cd backend
-source .venv/bin/activate
-python3 scripts/simulate_sensor.py --host localhost --port 1883 --topic solar/sensors --interval 2
-```
-
-### Live simulator control page (recommended for demos)
-
-Start the simulator with its local control page:
-
-```bash
-cd backend
-source .venv/bin/activate
-python3 scripts/simulate_sensor.py --web
-```
-
-Open **http://localhost:8765** in a browser. You can switch between normal,
-degraded, fault, night, and mixed scenarios; adjust the publish interval; set
-individual sensor values; and add hardware diagnostic statuses. Click **Apply
-settings** and the next reading uses the new values—no simulator restart is
-needed. The dashboard polls live readings every five seconds, so allow up to
-five seconds for the new scenario to appear. The page is bound to localhost
-only by default. Use `--web-port 9000` to select another port.
-
-Force only fault samples:
-
-```bash
-python3 scripts/simulate_sensor.py --mode fault
-```
-
-Tune fault/degraded frequency (when `--mode mixed`):
-
-```bash
-python3 scripts/simulate_sensor.py --mode mixed --fault-prob 0.10 --degraded-prob 0.25
-```
-
-Send a fixed number of messages then exit:
-
-```bash
-python3 scripts/simulate_sensor.py --count 50
-```
-
-Override a specific sensor value for every payload:
-
-```bash
-python3 scripts/simulate_sensor.py --override-sensor lux --override-value 7500
-```
-
-Include optional hardware diagnostics in the payload:
-
-```bash
-python3 scripts/simulate_sensor.py --hardware-status 0 0 0 5
-```
-
-## Data ingestion contract (MQTT payload)
-
-The MQTT subscriber expects JSON payloads on `MQTT_TOPIC` with fields:
-
-- `device_id` (string)
-- `timestamp` (string): either `YYYY-MM-DD HH:MM` (treated as UTC) or ISO-8601/RFC3339
-- `voltage` (number)
-- `current` (number)
-- `lux` (number)
-- `temperature` (number)
-- `humidity` (number)
-- `hardware_status` (optional object): numeric status codes for diagnostics
-  - `bme280`, `ina219`, `bh1750`, `ds3231` (each integer 0-5)
-
-> Important: firmware must send `lux` not `light`, and must include `device_id`.
-
-Power is computed as `power = voltage * current` before writing to InfluxDB.
-
-Example publish (Mosquitto):
-
-```bash
-mosquitto_pub -h localhost -p 1883 -t solar/sensors -m '{
-  "device_id":"esp32-01",
-  "timestamp":"2026-04-16 21:45",
-  "voltage":18.5,
-  "current":2.0,
-  "lux":52000,
-  "temperature":34.0,
-  "humidity":60.0
-}'
-```
-
-## Background jobs
-
-On app startup, `main.py` starts:
-
-- **MQTTSubscriber**: connects to the broker and subscribes to `MQTT_TOPIC`
-- **PredictionScheduler**: runs every `PREDICTION_BATCH_INTERVAL_SECONDS`
-
-The scheduler will **skip** prediction runs if:
-
-- ML assets are not available (`ml_runner.is_ready() == false`)
-- no recent raw sensor data exists in the last ~30 minutes
-
-## API endpoints
-
-### Public
-
-- `GET /health` → `{ "status": "ok" }`
-
-### Authenticated (Firebase Bearer token required)
-
-All endpoints below require:
-
-`Authorization: Bearer <FIREBASE_ID_TOKEN>`
-
-- `GET /api/live?device_id=esp32-01`
-  - returns latest sensor row from Influx (or `null` if none)
-- `GET /api/history?field=power&start=<iso>&end=<iso>&device_id=...`
-  - if `start`/`end` omitted, defaults to last 24 hours
-  - `field` must be one of: `voltage`, `current`, `power`, `temperature`, `humidity`, `lux`
-- `GET /api/predictions?device_id=...`
-  - returns latest prediction (or `null` if none)
-- `GET /api/alerts?device_id=...`
-  - returns latest alerts list (may be empty)
-- `GET /api/hardware-status?device_id=...`
-  - returns the latest device diagnostics snapshot with `bme280`, `ina219`, `bh1750`, and `ds3231`
-- `GET /api/maintenance?device_id=...`
-  - derived view based on latest prediction + efficiency trend
-
-## Troubleshooting
-
-- **Server crashes at startup with “Missing InfluxDB config”**
-  - Set `INFLUX_URL`, `INFLUX_TOKEN`, `INFLUX_ORG`
-- **`/api/*` returns 401**
-  - You must be logged in on the frontend and send a Firebase ID token
-  - Ensure `FIREBASE_SERVICE_ACCOUNT_PATH` points to a valid service account JSON
-- **Predictions never appear**
-  - Ensure you have recent raw sensor data in Influx (publish MQTT messages)
-  - Ensure ML assets exist (`backend/ml_models/*`) or run `scripts/generate_dummy_models.py`
-  - Reduce `PREDICTION_BATCH_INTERVAL_SECONDS` for faster local iteration
-
-## Diagnostics module
-
-`backend/diagnostics/` is an independent, deterministic root-cause analysis module. It does not alter MQTT ingestion, InfluxDB storage, the ML pipeline, API routes, or the frontend. It consumes telemetry, historical telemetry, an optional ML prediction, and ESP32 hardware-status values, then returns an explainable diagnostic result.
-
-The module includes rule-based detectors for:
-
-- Sensor Failure
-- Partial Shading
-- Dust Accumulation
-- Panel Degradation
-- Possible Panel Damage
-- Loose Wiring
-
-The ML prediction supplies the overall health label when available; diagnostics rules independently determine the likely cause, evidence, confidence score, severity, and maintenance recommendation.
-
-### Diagnostics requirements
-
-No additional packages are needed beyond `requirements.txt`. The diagnostics package uses Python standard-library dataclasses, enums, and statistics utilities.
-
-### Test diagnostics manually
-
-From the `backend/` directory, activate the virtual environment and open Python:
-
-```bash
-source .venv/bin/activate
-python
-```
-
-```python
-from diagnostics import run_diagnostics
-
-history = [
-    {
-        "voltage": 18.2,
-        "current": 2.0,
-        "power": 36.4,
-        "lux": 50000,
-        "temperature": 30,
-        "humidity": 55,
-    }
-    for _ in range(8)
-]
-
-result = run_diagnostics(
-    latest_telemetry={
-        "voltage": 18.0,
-        "current": 0.1,
-        "power": 1.8,
-        "lux": 52000,
-        "temperature": 31,
-        "humidity": 55,
-    },
-    historical_telemetry=history,
-    ml_prediction={"fault_class": 2, "fault_label": "Fault"},
-    hardware_status={"bme280": 0, "ina219": 0, "bh1750": 0, "ds3231": 0},
-)
-
-print(result.to_dict())
-```
-
-The example should identify `Partial Shading` with evidence and a confidence score. To test sensor diagnostics, set a hardware status to a non-zero value, for example `"bme280": 4`; the primary cause should become `Sensor Failure`.
+The field dataset has no verified physical-fault labels. Do not describe this
+system as a validated multi-class fault classifier or maintenance-days forecast.
+It is an expected-power anomaly baseline plus evidence-based diagnostics.
