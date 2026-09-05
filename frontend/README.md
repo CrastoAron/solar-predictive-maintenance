@@ -33,13 +33,15 @@ npm install
 cp .env.local.example .env.local
 ```
 
-Set the Firebase values and backend base URL in `.env.local`:
+Set the Firebase values, Supabase public values, and backend base URL in `.env.local`:
 
 ```env
 NEXT_PUBLIC_FIREBASE_API_KEY=...
 NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=...
 NEXT_PUBLIC_FIREBASE_PROJECT_ID=...
 NEXT_PUBLIC_FIREBASE_APP_ID=...
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_publishable_key
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
@@ -74,5 +76,15 @@ evidence-based rule result; it is not a confirmed physical diagnosis.
 npm exec tsc -- --noEmit
 ```
 
-The frontend expects Firebase Bearer-token authentication for backend read APIs.
-Administrator pages additionally require an administrator role from the backend.
+Customer pages use Firebase Google authentication. Administrator pages use
+Supabase email/password authentication and require the signed-in Supabase user
+to exist in the backend `admin_users` table with `role = 'admin'`. Create the
+Supabase Auth user first, then add its UUID in the SQL Editor:
+
+```sql
+insert into public.admin_users (user_id, email)
+values ('SUPABASE_AUTH_USER_UUID', 'admin@example.com');
+```
+
+The backend uses Firebase Admin to discover Google users and synchronizes them
+into `public.customers` when an administrator opens the customer list.

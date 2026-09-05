@@ -4,6 +4,8 @@ from copy import deepcopy
 import uuid
 from typing import Any
 
+from firebase_admin import auth as fb_auth
+from services.firebase_admin import _ensure_firebase_initialized
 from services.supabase_client import supabase_client
 
 
@@ -27,6 +29,50 @@ class AdminStore:
                 raise RuntimeError(f"Unable to list customers from Supabase: {err}") from err
 
         return [deepcopy(c) for c in self._customers]
+
+    def sync_google_customers(self) -> list[dict[str, Any]]:
+        """Mirror Firebase Google accounts into Supabase customer records."""
+        _ensure_firebase_initialized()
+        google_users: list[dict[str, Any]] = []
+        for user in fb_auth.list_users().iterate_all():
+            if not any(provider.provider_id == "google.com" for provider in user.provider_data):
+                continue
+
+            google_users.append(
+                {
+                    "firebase_uid": user.uid,
+                    "name": user.display_name or user.email or "Google Customer",
+                    "email": user.email or f"{user.uid}@invalid.local",
+                }
+            )
+
+        client = supabase_client.get_client()
+        if client:
+            try:
+                for customer in google_users:
+                    client.table("customers").upsert(
+                        {"id": str(uuid.uuid5(uuid.NAMESPACE_URL, customer["firebase_uid"])), **customer},
+                        on_conflict="firebase_uid",
+                    ).execute()
+            except Exception as err:
+                raise RuntimeError(f"Unable to sync Firebase customers to Supabase: {err}") from err
+        else:
+            for customer in google_users:
+                existing = next(
+                    (item for item in self._customers if item.get("firebase_uid") == customer["firebase_uid"]),
+                    None,
+                )
+                if existing:
+                    existing.update(customer)
+                else:
+                    self._customers.append({"id": str(uuid.uuid4()), **customer})
+
+        customers_by_uid = {customer["firebase_uid"]: customer for customer in google_users}
+        return [
+            {**customer, "provider": "Google"}
+            for customer in self.list_customers()
+            if customer.get("firebase_uid") in customers_by_uid
+        ]
 
     def create_customer(self, name: str, email: str, firebase_uid: str | None = None) -> dict[str, Any]:
         client = supabase_client.get_client()

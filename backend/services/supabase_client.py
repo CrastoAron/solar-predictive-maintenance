@@ -26,3 +26,33 @@ class SupabaseClient:
 
 supabase_client = SupabaseClient()
 
+
+def verify_supabase_token(access_token: str) -> dict[str, str]:
+    """Validate a Supabase access token and require an admin_users record."""
+    client = supabase_client.get_client()
+    if not client:
+        raise RuntimeError("Supabase is not configured")
+
+    try:
+        response = client.auth.get_user(access_token)
+        user = response.user
+        if not user:
+            raise ValueError("Supabase user was not found")
+
+        admin_response = (
+            client.table("admin_users")
+            .select("role")
+            .eq("user_id", user.id)
+            .maybe_single()
+            .execute()
+        )
+        admin_record = admin_response.data
+        if not admin_record or admin_record.get("role") != "admin":
+            return {"uid": user.id, "role": "customer"}
+
+        return {"uid": user.id, "role": "admin", "email": user.email or ""}
+    except Exception as err:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=401, detail="Invalid or expired Supabase token") from err
+

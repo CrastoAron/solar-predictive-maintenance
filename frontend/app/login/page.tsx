@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { Link, Sun } from "lucide-react";
+import { Sun } from "lucide-react";
 
 function AdminLoginForm({ onSubmit, loading, error }: { onSubmit: (email: string, password: string) => Promise<void>; loading: boolean; error: string }) {
   const [email, setEmail] = useState("");

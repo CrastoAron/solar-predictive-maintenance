@@ -5,7 +5,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from dependencies import require_admin
+from dependencies import require_supabase_admin
 from diagnostics.panel_health import evaluate_panel_health
 from services.admin_store import admin_store
 
@@ -60,13 +60,13 @@ class EvaluatePanelHealthRequest(BaseModel):
 
 
 @router.get("/customers")
-async def list_customers(_: dict = Depends(require_admin)) -> dict[str, Any]:
-    return {"customers": admin_store.list_customers()}
+async def list_customers(_: dict = Depends(require_supabase_admin)) -> dict[str, Any]:
+    return {"customers": admin_store.sync_google_customers()}
 
 
 @router.post("/customers")
 async def create_customer(
-    body: CreateCustomerRequest, _: dict = Depends(require_admin)
+    body: CreateCustomerRequest, _: dict = Depends(require_supabase_admin)
 ) -> dict[str, Any]:
     customer = admin_store.create_customer(
         name=body.name, email=body.email, firebase_uid=body.firebase_uid
@@ -75,7 +75,7 @@ async def create_customer(
 
 
 @router.get("/customers/{customer_id}")
-async def get_customer(customer_id: str, _: dict = Depends(require_admin)) -> dict[str, Any]:
+async def get_customer(customer_id: str, _: dict = Depends(require_supabase_admin)) -> dict[str, Any]:
     detail = admin_store.get_customer_detail(customer_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Customer not found")
@@ -84,7 +84,7 @@ async def get_customer(customer_id: str, _: dict = Depends(require_admin)) -> di
 
 @router.post("/customers/{customer_id}/panels")
 async def add_panel_to_customer(
-    customer_id: str, body: CreatePanelRequest, _: dict = Depends(require_admin)
+    customer_id: str, body: CreatePanelRequest, _: dict = Depends(require_supabase_admin)
 ) -> dict[str, Any]:
     payload = body.model_dump(exclude_unset=True)
     panel = admin_store.add_panel(customer_id, payload=payload)
@@ -93,7 +93,7 @@ async def add_panel_to_customer(
 
 @router.post("/customers/{customer_id}/arrays")
 async def create_array(
-    customer_id: str, body: CreateArrayRequest, _: dict = Depends(require_admin)
+    customer_id: str, body: CreateArrayRequest, _: dict = Depends(require_supabase_admin)
 ) -> dict[str, Any]:
     array_ = admin_store.create_array(
         customer_id=customer_id, rows=body.rows, cols=body.cols, name=body.name or "Main Array"
@@ -103,7 +103,7 @@ async def create_array(
 
 @router.post("/arrays/{array_id}/panels")
 async def bulk_create_panels(
-    array_id: str, body: BulkCreatePanelsRequest, _: dict = Depends(require_admin)
+    array_id: str, body: BulkCreatePanelsRequest, _: dict = Depends(require_supabase_admin)
 ) -> dict[str, Any]:
     panels = admin_store.bulk_create_panels(array_id=array_id, rows=body.rows, cols=body.cols)
     return {"array_id": array_id, "panels": panels}
@@ -111,7 +111,7 @@ async def bulk_create_panels(
 
 @router.put("/panels/{panel_id}")
 async def update_panel(
-    panel_id: str, body: UpdatePanelRequest, _: dict = Depends(require_admin)
+    panel_id: str, body: UpdatePanelRequest, _: dict = Depends(require_supabase_admin)
 ) -> dict[str, Any]:
     payload = body.model_dump(exclude_unset=True)
     updated = admin_store.update_panel(panel_id, payload=payload)
@@ -121,7 +121,7 @@ async def update_panel(
 
 
 @router.delete("/panels/{panel_id}")
-async def delete_panel(panel_id: str, _: dict = Depends(require_admin)) -> dict[str, Any]:
+async def delete_panel(panel_id: str, _: dict = Depends(require_supabase_admin)) -> dict[str, Any]:
     deleted = admin_store.delete_panel(panel_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Panel not found")
@@ -130,7 +130,7 @@ async def delete_panel(panel_id: str, _: dict = Depends(require_admin)) -> dict[
 
 @router.post("/panels/evaluate")
 async def evaluate_panel(
-    body: EvaluatePanelHealthRequest, _: dict = Depends(require_admin)
+    body: EvaluatePanelHealthRequest, _: dict = Depends(require_supabase_admin)
 ) -> dict[str, Any]:
     reading = {"voltage": body.voltage, "current": body.current}
     panel_config = {"rated_voltage": body.rated_voltage, "rated_current": body.rated_current}

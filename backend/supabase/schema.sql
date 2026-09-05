@@ -11,6 +11,13 @@ create table if not exists public.customers (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.admin_users (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  email text unique not null,
+  role text not null default 'admin' check (role = 'admin'),
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.panel_arrays (
   id uuid primary key,
   customer_id uuid not null references public.customers(id) on delete cascade,

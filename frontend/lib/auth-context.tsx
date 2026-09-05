@@ -8,13 +8,13 @@ import {
   ReactNode,
 } from "react";
 import {
-  User,
+  User as FirebaseUser,
   onAuthStateChanged,
   signInWithPopup,
   signOut as firebaseSignOut,
-  signInWithEmailAndPassword,
 } from "firebase/auth";
 import { auth, googleProvider } from "./firebase";
+import { supabase } from "./supabase";
 import { API_BASE, apiHeaders } from "./api-config";
 import { useRouter } from "next/navigation";
 
@@ -34,7 +34,7 @@ const persistRedirectTarget = (target: "admin" | "customer" | null) => {
 };
 
 interface AuthContextType {
-  user: User | null;
+  user: { uid: string; email?: string | null; photoURL?: string | null; displayName?: string | null } | null;
   role: string;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
@@ -52,12 +52,12 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<{ uid: string; email?: string | null; photoURL?: string | null; displayName?: string | null } | null>(null);
   const [role, setRole] = useState("customer");
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  const resolveRole = async (firebaseUser: User | null) => {
+  const resolveRole = async (firebaseUser: FirebaseUser | null) => {
     if (!firebaseUser) {
       setUser(null);
       setRole("customer");
@@ -101,16 +101,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    if (!auth) {
-      setLoading(false);
-      return;
-    }
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
-      setLoading(false);
-      void resolveRole(firebaseUser);
+    const unsubscribeFirebase = auth
+      ? onAuthStateChanged(auth, (firebaseUser) => {
+          if (firebaseUser) {
+            setUser(firebaseUser);
+            setLoading(false);
+            void resolveRole(firebaseUser);
+          } else if (!supabase) {
+            setUser(null);
+            setLoading(false);
+          }
+        })
+      : () => {};
+
+    const supabaseSubscription = supabase?.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setUser({ uid: session.user.id, email: session.user.email });
+        setRole("admin");
+        setLoading(false);
+      } else if (!auth?.currentUser) {
+        setUser(null);
+        setRole("customer");
+        setLoading(false);
+      }
     });
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribeFirebase();
+      supabaseSubscription?.data.subscription.unsubscribe();
+    };
   }, []);
 
   const signInWithGoogle = async () => {
@@ -137,31 +156,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signInWithEmail = async (email: string, password: string, targetRole: "admin" | "customer" = "customer") => {
-    if (!auth) {
-      throw new Error("Firebase is not initialized.");
+    if (!supabase) {
+      throw new Error(
+        "Supabase is not initialized. Please configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY."
+      );
     }
 
-    const result = await signInWithEmailAndPassword(auth, email, password);
-    const token = await result.user.getIdToken();
-    localStorage.setItem("firebase-token", token);
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error || !data.session) {
+      throw new Error(error?.message || "Admin sign-in failed.");
+    }
 
-    await fetch(`${API_BASE}/auth/me`, {
-      headers: apiHeaders(token),
-    });
-
-    const nextRole = targetRole === "admin" ? "admin" : "customer";
-    setRole(nextRole);
-    persistRedirectTarget(nextRole);
-    router.replace(nextRole === "admin" ? "/admin/dashboard" : "/dashboard");
+    localStorage.setItem("admin-token", data.session.access_token);
+    setUser({ uid: data.user.id, email: data.user.email });
+    setRole("admin");
+    persistRedirectTarget(targetRole);
+    router.replace("/admin/dashboard");
   };
 
   const signOut = async () => {
     setUser(null);
     setRole("customer");
     localStorage.removeItem("firebase-token");
+    localStorage.removeItem("admin-token");
     persistRedirectTarget(null);
     if (auth) {
       await firebaseSignOut(auth);
+    }
+    if (supabase) {
+      await supabase.auth.signOut();
     }
     router.replace("/login");
   };

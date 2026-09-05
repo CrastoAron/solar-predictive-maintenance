@@ -61,8 +61,6 @@ export default function CustomerConfigPage() {
   const [newCellCols, setNewCellCols] = useState(4);
   const [newRatedVoltage, setNewRatedVoltage] = useState(38.5);
   const [newRatedCurrent, setNewRatedCurrent] = useState(9.8);
-  const [newWidthMm, setNewWidthMm] = useState(1650);
-  const [newHeightMm, setNewHeightMm] = useState(992);
   const [addingPanel, setAddingPanel] = useState(false);
 
   // UI feedback state
@@ -81,7 +79,7 @@ export default function CustomerConfigPage() {
   }, [loading, role, user, router]);
 
   const loadCustomerDetail = useCallback(async () => {
-    const token = localStorage.getItem("firebase-token");
+    const token = localStorage.getItem("admin-token");
     if (!token) {
       router.replace("/login");
       return;
@@ -124,7 +122,7 @@ export default function CustomerConfigPage() {
   // Handle adding a new physical solar panel
   const handleAddPanel = async (e: React.FormEvent) => {
     e.preventDefault();
-    const token = localStorage.getItem("firebase-token");
+    const token = localStorage.getItem("admin-token");
     if (!token || !params.customerId) return;
 
     setAddingPanel(true);
@@ -141,8 +139,6 @@ export default function CustomerConfigPage() {
             cell_cols: newCellCols,
             rated_voltage: newRatedVoltage,
             rated_current: newRatedCurrent,
-            panel_width_mm: newWidthMm,
-            panel_height_mm: newHeightMm,
           }),
         }
       );
@@ -169,7 +165,7 @@ export default function CustomerConfigPage() {
   // Handle saving panel edits
   const handleSavePanelConfig = async () => {
     if (!selectedPanel) return;
-    const token = localStorage.getItem("firebase-token");
+    const token = localStorage.getItem("admin-token");
     if (!token) return;
 
     setSavingPanel(true);
@@ -209,7 +205,7 @@ export default function CustomerConfigPage() {
 
   // Handle deleting a panel
   const handleDeletePanel = async (panelId: string) => {
-    const token = localStorage.getItem("firebase-token");
+    const token = localStorage.getItem("admin-token");
     if (!token) return;
 
     try {

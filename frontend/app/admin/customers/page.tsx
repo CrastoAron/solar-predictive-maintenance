@@ -23,6 +23,7 @@ interface Customer {
   email: string;
   firebase_uid?: string;
   created_at?: string;
+  provider?: string;
 }
 
 export default function AdminCustomersPage() {
@@ -50,7 +51,7 @@ export default function AdminCustomersPage() {
   }, [loading, role, user, router]);
 
   const loadCustomers = useCallback(() => {
-    const token = localStorage.getItem("firebase-token");
+    const token = localStorage.getItem("admin-token");
     if (!token) {
       router.replace("/login");
       return;
@@ -85,7 +86,7 @@ export default function AdminCustomersPage() {
     e.preventDefault();
     if (!newCustomerName.trim() || !newCustomerEmail.trim()) return;
 
-    const token = localStorage.getItem("firebase-token");
+    const token = localStorage.getItem("admin-token");
     if (!token) return;
 
     setCreating(true);
@@ -198,6 +199,7 @@ export default function AdminCustomersPage() {
                 <tr>
                   <th className="px-6 py-4">Customer</th>
                   <th className="px-6 py-4">Email Address</th>
+                  <th className="px-6 py-4">Provider</th>
                   <th className="px-6 py-4">System ID</th>
                   <th className="px-6 py-4 text-right">Actions</th>
                 </tr>
@@ -205,13 +207,13 @@ export default function AdminCustomersPage() {
               <tbody className="divide-y divide-slate-800/60 font-medium">
                 {fetching ? (
                   <tr>
-                    <td colSpan={4} className="px-6 py-12 text-center text-slate-500">
+                    <td colSpan={5} className="px-6 py-12 text-center text-slate-500">
                       Loading customer database...
                     </td>
                   </tr>
                 ) : filteredCustomers.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-6 py-12 text-center text-slate-500">
+                    <td colSpan={5} className="px-6 py-12 text-center text-slate-500">
                       {searchQuery ? "No matching customers found." : "No customers registered yet. Click 'Add Customer' above."}
                     </td>
                   </tr>
@@ -234,6 +236,8 @@ export default function AdminCustomersPage() {
                         </div>
                       </td>
                       <td className="px-6 py-4 text-xs font-mono text-slate-400">{c.id}</td>
+                                            <td className="px-6 py-4 text-slate-300">{c.provider || "Google"}</td>
+                                            <td className="px-6 py-4 text-xs font-mono text-slate-400">{c.id}</td>
                       <td className="px-6 py-4 text-right">
                         <button
                           onClick={() => router.push(`/admin/customers/${c.id}`)}

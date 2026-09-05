@@ -40,7 +40,7 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     if (loading || !user || role !== "admin") return;
 
-    const token = localStorage.getItem("firebase-token");
+    const token = localStorage.getItem("admin-token");
     if (!token) {
       router.replace("/login");
       return;
