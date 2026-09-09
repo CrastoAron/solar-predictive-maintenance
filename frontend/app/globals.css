@@ -3,12 +3,91 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer base {
-  :root {
-    color-scheme: dark;
-    font-size: 16px;
-  }
+/* ─── CSS Design Tokens ─────────────────────────────────────────────── */
+:root {
+  /* Dark theme (default) — black from screenshots */
+  --bg: #0d0d14;
+  --surface: #12121c;
+  --card: #161622;
+  --card-hover: #1a1a28;
+  --border: #1e1e2e;
+  --border-subtle: #16162a;
 
+  --text-primary: #ffffff;
+  --text-secondary: #a8a8c0;
+  --text-muted: #5a5a78;
+
+  --accent: #f97316;
+  --accent-light: #fb923c;
+  --accent-hover: #ea6c0a;
+  --accent-bg: rgba(249, 115, 22, 0.12);
+  --accent-ring: rgba(249, 115, 22, 0.25);
+
+  --success: #22c55e;
+  --success-bg: rgba(34, 197, 94, 0.12);
+  --warning: #f97316;
+  --warning-bg: rgba(249, 115, 22, 0.12);
+  --danger: #ef4444;
+  --danger-bg: rgba(239, 68, 68, 0.12);
+  --info: #3b82f6;
+  --info-bg: rgba(59, 130, 246, 0.12);
+
+  --sidebar-bg: #0a0a12;
+  --sidebar-border: #16162a;
+
+  --input-bg: #12121c;
+  --input-border: #252535;
+
+  --scrollbar: rgba(255,255,255,0.08);
+  --tooltip-bg: #1e1e30;
+  --chart-grid: rgba(255,255,255,0.05);
+
+  color-scheme: dark;
+}
+
+/* Light theme overrides — from screenshots */
+.light {
+  --bg: #f0f2f8;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f8f9fc;
+  --border: #e2e4ef;
+  --border-subtle: #eceef5;
+
+  --text-primary: #0f1020;
+  --text-secondary: #4a4d6a;
+  --text-muted: #9096b8;
+
+  --accent: #f97316;
+  --accent-light: #fb923c;
+  --accent-hover: #ea6c0a;
+  --accent-bg: rgba(249, 115, 22, 0.09);
+  --accent-ring: rgba(249, 115, 22, 0.2);
+
+  --success: #16a34a;
+  --success-bg: rgba(22, 163, 74, 0.09);
+  --warning: #ea570a;
+  --warning-bg: rgba(234, 87, 10, 0.09);
+  --danger: #dc2626;
+  --danger-bg: rgba(220, 38, 38, 0.09);
+  --info: #2563eb;
+  --info-bg: rgba(37, 99, 235, 0.09);
+
+  --sidebar-bg: #ffffff;
+  --sidebar-border: #e2e4ef;
+
+  --input-bg: #f5f6fa;
+  --input-border: #d8daeb;
+
+  --scrollbar: rgba(0,0,0,0.12);
+  --tooltip-bg: #1e1e30;
+  --chart-grid: rgba(0,0,0,0.06);
+
+  color-scheme: light;
+}
+
+/* ─── Base reset ─────────────────────────────────────────────────────── */
+@layer base {
   * {
     box-sizing: border-box;
   }
@@ -17,14 +96,20 @@
     scroll-behavior: smooth;
   }
 
+  body {
+    background-color: var(--bg);
+    color: var(--text-primary);
+    transition: background-color 0.15s ease, color 0.15s ease;
+  }
+
   ::selection {
     background: rgba(249, 115, 22, 0.3);
     color: #fff;
   }
 
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
   }
 
   ::-webkit-scrollbar-track {
@@ -32,38 +117,112 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--scrollbar);
     border-radius: 9999px;
+  }
+
+  input[type="date"],
+  input[type="datetime-local"] {
+    color-scheme: inherit;
   }
 }
 
+/* ─── Component utilities ────────────────────────────────────────────── */
 @layer utilities {
-  /* On mobile: no left margin (sidebar overlays).
-     On lg+: shift content right of the 256px sidebar. */
+  /* ── Layout ── */
   .page-shell {
-    @apply ml-0 lg:ml-64 min-h-screen p-4 sm:p-6 lg:p-8 bg-[#0f1117];
+    @apply ml-0 lg:ml-64 min-h-screen;
+    background-color: var(--bg);
   }
 
-  /* Top bar spacer on mobile so content doesn't hide under the nav bar */
   .page-shell-top {
-    @apply pt-16 lg:pt-0;
+    @apply pt-14 lg:pt-0;
   }
 
+  /* ── Cards ── */
+  .ss-card {
+    background-color: var(--card);
+    border: 1px solid var(--border);
+    @apply rounded-2xl;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .ss-card-hover {
+    @apply ss-card;
+    cursor: pointer;
+  }
+
+  .ss-card-hover:hover {
+    background-color: var(--card-hover);
+    border-color: var(--accent-ring);
+  }
+
+  /* Legacy alias for existing pages */
   .glass-card {
-    @apply rounded-2xl bg-white/[0.03] border border-white/[0.07] backdrop-blur-sm;
+    @apply ss-card;
   }
 
+  /* ── Typography ── */
   .section-title {
-    @apply text-xl font-semibold text-white;
+    @apply text-sm font-semibold uppercase tracking-widest;
+    color: var(--text-muted);
   }
 
+  .page-title {
+    @apply text-2xl font-bold;
+    color: var(--text-primary);
+  }
+
+  .page-subtitle {
+    @apply text-sm mt-0.5;
+    color: var(--text-secondary);
+  }
+
+  /* Legacy alias */
   .section-sub {
-    @apply text-base text-slate-400;
+    color: var(--text-secondary);
+    @apply text-sm;
   }
 
-  /* Shimmer skeleton — replaces animate-pulse with a moving highlight sweep */
+  /* ── Inputs ── */
+  .ss-input {
+    background-color: var(--input-bg);
+    border: 1px solid var(--input-border);
+    color: var(--text-primary);
+    @apply rounded-xl px-4 py-2.5 text-sm outline-none transition;
+  }
+
+  .ss-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-ring);
+  }
+
+  /* ── Buttons ── */
+  .ss-btn-primary {
+    background-color: var(--accent);
+    @apply text-white rounded-xl px-4 py-2.5 text-sm font-semibold transition;
+  }
+
+  .ss-btn-primary:hover {
+    background-color: var(--accent-hover);
+  }
+
+  .ss-btn-ghost {
+    background-color: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    @apply rounded-xl px-4 py-2.5 text-sm font-medium transition;
+  }
+
+  .ss-btn-ghost:hover {
+    background-color: var(--card-hover);
+    color: var(--text-primary);
+  }
+
+  /* ── Skeleton loader ── */
   .skeleton {
-    @apply bg-white/[0.04] rounded-xl relative overflow-hidden;
+    background-color: var(--card);
+    @apply rounded-xl relative overflow-hidden;
   }
 
   .skeleton::after {
@@ -73,48 +232,60 @@
     background: linear-gradient(
       90deg,
       transparent 0%,
-      rgba(255, 255, 255, 0.055) 50%,
+      rgba(255, 255, 255, 0.04) 50%,
       transparent 100%
     );
     animation: shimmer 1.8s ease-in-out infinite;
   }
 
-  /* Mobile sidebar overlay backdrop */
+  /* ── Mobile sidebar overlay ── */
   .sidebar-overlay {
-    @apply fixed inset-0 bg-black/60 backdrop-blur-sm z-30 lg:hidden;
+    @apply fixed inset-0 z-30 lg:hidden;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(2px);
+  }
+
+  /* ── Nav active pill ── */
+  .nav-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150;
+    color: var(--text-secondary);
+  }
+
+  .nav-item:hover {
+    background-color: var(--card-hover);
+    color: var(--text-primary);
+  }
+
+  .nav-item.active {
+    background-color: var(--accent-bg);
+    color: var(--accent);
+  }
+
+  /* ── Status dots ── */
+  .dot-green  { @apply w-2 h-2 rounded-full bg-green-500; }
+  .dot-orange { @apply w-2 h-2 rounded-full bg-orange-500; }
+  .dot-red    { @apply w-2 h-2 rounded-full bg-red-500; }
+  .dot-blue   { @apply w-2 h-2 rounded-full bg-blue-500; }
+
+  /* ── Divider ── */
+  .ss-divider {
+    border-top: 1px solid var(--border);
   }
 
   /* ─── Animations ──────────────────────────────────────────────────── */
   @keyframes fade-in {
-    from {
-      opacity: 0;
-    }
-
-    to {
-      opacity: 1;
-    }
+    from { opacity: 0; }
+    to   { opacity: 1; }
   }
 
   @keyframes fade-in-up {
-    from {
-      opacity: 0;
-      transform: translateY(20px);
-    }
-
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
   }
 
   @keyframes slide-in-left {
-    from {
-      transform: translateX(-100%);
-    }
-
-    to {
-      transform: translateX(0);
-    }
+    from { transform: translateX(-100%); }
+    to   { transform: translateX(0); }
   }
 
   @keyframes shimmer {
@@ -127,15 +298,7 @@
     to   { width: 0%; }
   }
 
-  .animate-fade-in {
-    animation: fade-in 1s ease-out forwards;
-  }
-
-  .animate-fade-in-up {
-    animation: fade-in-up 1s ease-out forwards;
-  }
-
-  .animate-slide-in-left {
-    animation: slide-in-left 0.25s ease-out forwards;
-  }
+  .animate-fade-in      { animation: fade-in 0.3s ease-out forwards; }
+  .animate-fade-in-up   { animation: fade-in-up 0.35s ease-out forwards; }
+  .animate-slide-in-left{ animation: slide-in-left 0.25s ease-out forwards; }
 }
