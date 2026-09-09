@@ -1,15 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useAppContext } from "@/lib/app-context";
-import { useToast } from "@/lib/toast-context";
 import { getAlerts, Alert } from "@/lib/api";
-import NavSidebar from "@/components/ui/NavSidebar";
-import AlertRow from "@/components/ui/AlertRow";
-import ErrorState from "@/components/ui/ErrorState";
-import { Bell } from "lucide-react";
+import AppLayout from "@/components/layout/AppLayout";
+import StatCard from "@/components/ui/StatCard";
+import { Bell, AlertTriangle, Info, Search, ShieldAlert } from "lucide-react";
+import { useToast } from "@/lib/toast-context";
 
 export default function AlertsPage() {
   const { user } = useAuth();
@@ -18,145 +17,187 @@ export default function AlertsPage() {
   const { addToast } = useToast();
 
   const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [filterType, setFilterType] = useState<string>("All");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [resolvedMap, setResolvedMap] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!user) router.replace("/login");
   }, [user, router]);
 
+  const fetchAlertsData = useCallback(async () => {
+    try {
+      const data = await getAlerts();
+      const list = data?.alerts || [];
+      setAlerts(list);
+      const criticals = list.filter((a) => a.severity === "high" || a.type === "error").length;
+      setCriticalAlertCount(criticals);
+    } catch (e) {
+      console.error(e);
+    }
+  }, [setCriticalAlertCount]);
+
   useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
+    if (user) fetchAlertsData();
+  }, [user, fetchAlertsData]);
 
-    const fetchAlerts = async () => {
-      try {
-        const d = await getAlerts();
-        if (cancelled) return;
-        setAlerts(d.alerts);
-        setLastUpdated(new Date());
-        setError(null);
+  const toggleResolve = (id: string) => {
+    setResolvedMap((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      const currentResolved = next[id];
+      addToast(
+        currentResolved ? "success" : "info",
+        `Alert ${id} marked as ${currentResolved ? "Resolved" : "Active"}.`
+      );
+      return next;
+    });
+  };
 
-        // Report critical count to sidebar badge
-        const critical = d.alerts.filter((a) => a.severity === "high" && !a.resolved).length;
-        setCriticalAlertCount(critical);
-      } catch (e) {
-        console.error(e);
-        if (!cancelled) {
-          setError("Failed to fetch alerts. Make sure the backend is reachable.");
-          addToast("error", "Could not load alerts — backend may be offline.");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
+  const criticalCount = alerts.filter((a) => a.severity === "high" || a.type === "error").length;
+  const warningCount = alerts.filter((a) => a.severity === "medium").length;
+  const infoCount = alerts.filter((a) => a.severity === "low" || (!a.severity && a.type !== "error")).length;
 
-    fetchAlerts();
-    const id = setInterval(fetchAlerts, 10_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [user, setCriticalAlertCount, addToast]);
-
-  const highCount = alerts.filter((a) => a.severity === "high" && !a.resolved).length;
-  const openCount = alerts.filter((a) => !a.resolved).length;
+  const filteredAlerts = alerts.filter((a) => {
+    const matchesSearch =
+      a.message.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      a.id.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesFilter =
+      filterType === "All" ||
+      (filterType === "Critical" && (a.severity === "high" || a.type === "error")) ||
+      (filterType === "Warning" && a.severity === "medium") ||
+      (filterType === "Info" && (a.severity === "low" || (!a.severity && a.type !== "error")));
+    return matchesSearch && matchesFilter;
+  });
 
   return (
-    <div className="flex min-h-screen bg-[#0f1117]">
-      <NavSidebar />
-      <main className="page-shell page-shell-top flex-1">
-        <div className="flex items-start justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-white">Alerts</h1>
-            <p className="text-slate-400 text-base mt-1">
-              {openCount} open · {highCount} critical
-            </p>
-            <p className="text-slate-500 text-sm mt-1">
-              {lastUpdated ? `Auto-refresh: ${lastUpdated.toLocaleTimeString()}` : "Auto-refreshing…"}
-            </p>
+    <AppLayout
+      title="Alerts & System Notifications"
+      description="Real-time predictive maintenance warnings and hardware diagnostics"
+      actions={
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search alerts..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="ss-input pl-9 py-1.5 text-xs w-48 sm:w-64"
+            />
           </div>
-          {highCount > 0 && (
-            <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-500/10 border border-red-500/20">
-              <Bell className="w-4 h-4 text-red-400 animate-pulse" />
-              <span className="text-red-400 text-sm font-medium">
-                {highCount} critical alert{highCount > 1 ? "s" : ""}
-              </span>
-            </div>
-          )}
+          <select
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value)}
+            className="ss-input py-1.5 px-3 text-xs font-semibold"
+          >
+            <option value="All">All Severity</option>
+            <option value="Critical">Critical</option>
+            <option value="Warning">Warning</option>
+            <option value="Info">Info</option>
+          </select>
+        </div>
+      }
+    >
+      <div className="space-y-6">
+        {/* Top 4 Stat Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <StatCard label="Total Active Alerts" value={alerts.length} icon={<Bell className="w-5 h-5" />} />
+          <StatCard label="Critical Alerts" value={criticalCount} statusText="Urgent" statusType="critical" icon={<ShieldAlert className="w-5 h-5" />} />
+          <StatCard label="Warnings" value={warningCount} statusText="Inspect" statusType="warning" icon={<AlertTriangle className="w-5 h-5" />} />
+          <StatCard label="Informational" value={infoCount} icon={<Info className="w-5 h-5" />} />
         </div>
 
-        {/* Error state */}
-        {error && !loading ? (
-          <ErrorState message={error} onRetry={() => window.location.reload()} />
-        ) : (
-          <>
-            {/* Summary badges */}
-            <div className="flex gap-3 mb-6">
-              {(["high", "medium", "low"] as const).map((sev) => {
-                const count = alerts.filter((a) => a.severity === sev).length;
-                const colors = {
-                  high:   "bg-red-500/10 text-red-400 ring-red-500/20",
-                  medium: "bg-amber-500/10 text-amber-400 ring-amber-500/20",
-                  low:    "bg-emerald-500/10 text-emerald-400 ring-emerald-500/20",
-                };
+        {/* Alerts List Feed */}
+        <div className="ss-card p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-bold" style={{ color: "var(--text-primary)" }}>
+              Alert Stream
+            </h3>
+            <span className="text-xs font-semibold" style={{ color: "var(--text-muted)" }}>
+              Showing {filteredAlerts.length} notifications
+            </span>
+          </div>
+
+          {filteredAlerts.length > 0 ? (
+            <div className="space-y-3">
+              {filteredAlerts.map((alert) => {
+                const isResolved = !!resolvedMap[alert.id];
+                const isCritical = alert.severity === "high" || alert.type === "error";
+                const isWarning = alert.severity === "medium";
+
+                const icon = isCritical ? (
+                  <ShieldAlert className="w-5 h-5 text-red-500" />
+                ) : isWarning ? (
+                  <AlertTriangle className="w-5 h-5 text-orange-500" />
+                ) : (
+                  <Info className="w-5 h-5 text-blue-500" />
+                );
+
+                const borderLeftColor = isCritical ? "#ef4444" : isWarning ? "#f97316" : "#3b82f6";
+
                 return (
-                  <span
-                    key={sev}
-                    className={`px-4 py-1.5 rounded-full text-sm font-medium ring-1 ${colors[sev]}`}
+                  <div
+                    key={alert.id}
+                    className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all ${
+                      isResolved ? "opacity-50" : ""
+                    }`}
+                    style={{
+                      backgroundColor: "var(--card)",
+                      borderColor: "var(--border)",
+                      borderLeft: `4px solid ${borderLeftColor}`,
+                    }}
                   >
-                    {count} {sev}
-                  </span>
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5">{icon}</div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold font-mono" style={{ color: "var(--text-primary)" }}>
+                            {alert.id}
+                          </span>
+                          <span
+                            className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase"
+                            style={{
+                              backgroundColor: isCritical
+                                ? "rgba(239,68,68,0.12)"
+                                : isWarning
+                                ? "rgba(249,115,22,0.12)"
+                                : "rgba(59,130,246,0.12)",
+                              color: borderLeftColor,
+                            }}
+                          >
+                            {alert.severity || alert.type || "INFO"}
+                          </span>
+                          <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                            {new Date(alert.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                        </div>
+                        <p className="text-xs font-medium mt-1" style={{ color: "var(--text-primary)" }}>
+                          {alert.message}
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => toggleResolve(alert.id)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                        isResolved
+                          ? "border-emerald-500 text-emerald-500 bg-emerald-500/10"
+                          : "border-slate-700 text-slate-300 hover:border-orange-500"
+                      }`}
+                    >
+                      {isResolved ? "✓ Resolved" : "Mark Resolved"}
+                    </button>
+                  </div>
                 );
               })}
             </div>
-
-            {/* Table */}
-            <div className="glass-card overflow-hidden">
-              {loading ? (
-                <div className="p-6 space-y-3">
-                  {[...Array(4)].map((_, i) => (
-                    <div key={i} className="skeleton h-10 w-full" />
-                  ))}
-                </div>
-              ) : alerts.length === 0 ? (
-                <div className="py-20 flex flex-col items-center gap-4 text-center">
-                  <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                    <Bell className="w-7 h-7 text-emerald-400" />
-                  </div>
-                  <div>
-                    <p className="text-white font-semibold text-lg mb-1">All clear!</p>
-                    <p className="text-slate-400 text-sm">No alerts found — your system is running smoothly 🎉</p>
-                  </div>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="border-b border-white/5">
-                        {["Time", "Type", "Severity", "Message", "Status"].map((h) => (
-                          <th
-                            key={h}
-                            className="px-4 py-3 text-sm text-slate-500 font-medium uppercase tracking-wide"
-                          >
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {alerts.map((alert) => (
-                        <AlertRow key={alert.id} alert={alert} />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+          ) : (
+            <div className="text-center py-12 text-xs font-semibold" style={{ color: "var(--text-muted)" }}>
+              No alerts match your filter criteria.
             </div>
-          </>
-        )}
-      </main>
-    </div>
+          )}
+        </div>
+      </div>
+    </AppLayout>
   );
 }
