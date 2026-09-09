@@ -3,222 +3,234 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { getHistory, getHistoryMeta, HistoryPoint } from "@/lib/api";
-import NavSidebar from "@/components/ui/NavSidebar";
-import ErrorState from "@/components/ui/ErrorState";
-import { format, subDays } from "date-fns";
-import { Download, ChevronLeft, ChevronRight } from "lucide-react";
-
-const FIELDS = ["power", "voltage", "current", "temperature", "humidity", "lux"];
-const PAGE_SIZE = 25;
+import { getHistory, HistoryData } from "@/lib/api";
+import AppLayout from "@/components/layout/AppLayout";
+import StatCard from "@/components/ui/StatCard";
+import { History, Download, Calendar, Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { useToast } from "@/lib/toast-context";
 
 export default function HistoryPage() {
   const { user } = useAuth();
   const router = useRouter();
+  const { addToast } = useToast();
 
+  const today = new Date();
+  const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  const [startDate, setStartDate] = useState(weekAgo.toISOString().split("T")[0]);
+  const [endDate, setEndDate] = useState(today.toISOString().split("T")[0]);
   const [field, setField] = useState("power");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  const [data, setData] = useState<HistoryPoint[]>([]);
-  const [page, setPage] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const [historyData, setHistoryData] = useState<HistoryData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const pageSize = 12;
 
   useEffect(() => {
     if (!user) router.replace("/login");
   }, [user, router]);
 
-  const fetchData = useCallback(async () => {
+  const fetchHistoryLogs = useCallback(async () => {
     setLoading(true);
-    setPage(0);
     try {
-      const start = new Date(startDate + "T00:00:00Z").toISOString();
-      const end = new Date(endDate + "T23:59:59Z").toISOString();
-      const res = await getHistory(start, end, field);
-      setData(res.data);
-      setError(null);
+      const data = await getHistory(
+        new Date(startDate).toISOString(),
+        new Date(endDate).toISOString(),
+        field
+      );
+      setHistoryData(data);
     } catch (e) {
       console.error(e);
-      setData([]);
-      setError("Failed to load history. Check the backend and date range.");
+      addToast("error", "Failed to fetch historical telemetry.");
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, field]);
+  }, [startDate, endDate, field, addToast]);
 
   useEffect(() => {
-    if (!user) return;
-    // load earliest available date from server and set startDate
-    (async () => {
-      try {
-        const meta = await getHistoryMeta();
-        if (meta?.earliest) setStartDate(format(new Date(meta.earliest), "yyyy-MM-dd"));
-        else setStartDate(format(subDays(new Date(), 7), "yyyy-MM-dd"));
-      } catch (e) {
-        console.error("failed to load history meta", e);
-        setStartDate(format(subDays(new Date(), 7), "yyyy-MM-dd"));
-      }
-    })();
-  }, [user]);
+    if (user) fetchHistoryLogs();
+  }, [user, fetchHistoryLogs]);
 
-  useEffect(() => {
-    if (user && startDate) fetchData();
-  }, [user, startDate, fetchData]);
-
-  const totalPages = Math.ceil(data.length / PAGE_SIZE);
-  const pageData = data.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-
-  const exportCSV = () => {
-    const header = "timestamp,value\n";
-    const rows = data.map((r) => `${r.timestamp},${r.value}`).join("\n");
-    const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8;" });
+  const handleExportCSV = () => {
+    if (!historyData || historyData.data.length === 0) {
+      addToast("info", "No history data available for export.");
+      return;
+    }
+    const headers = "Timestamp,Field,Value\n";
+    const rows = historyData.data.map((d) => `${d.timestamp},${field},${d.value}`).join("\n");
+    const blob = new Blob([headers + rows], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `solarpanel-${field}-${startDate}-to-${endDate}.csv`;
+    a.download = `solarshield_history_${field}_${startDate}_${endDate}.csv`;
     a.click();
-    URL.revokeObjectURL(url);
+    addToast("success", "Exported telemetry CSV successfully.");
+  };
+
+  const rawData = historyData?.data || [];
+  const filteredData = rawData.filter((d) =>
+    d.timestamp.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const totalPages = Math.ceil(filteredData.length / pageSize) || 1;
+  const paginatedData = filteredData.slice((page - 1) * pageSize, page * pageSize);
+
+  const unitMap: Record<string, string> = {
+    power: "W",
+    voltage: "V",
+    current: "A",
+    irradiance: "W/m²",
+    temperature: "°C",
   };
 
   return (
-    <div className="flex min-h-screen bg-[#0f1117]">
-      <NavSidebar />
-      <main className="page-shell page-shell-top flex-1">
-        <div className="flex items-start justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-white">History</h1>
-            <p className="text-slate-400 text-base mt-1">
-              {data.length} records · {totalPages} pages
-            </p>
-          </div>
-          <button
-            onClick={exportCSV}
-            disabled={data.length === 0}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-orange-500/20"
-          >
-            <Download className="w-4 h-4" />
-            Export CSV
-          </button>
-        </div>
-
-        {/* Controls */}
-        <div className="glass-card p-5 mb-6">
-          <div className="flex flex-wrap items-end gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-slate-400 uppercase tracking-wide">Start Date</label>
+    <AppLayout
+      title="Telemetry Logs & History"
+      description="Paginated record of raw sensor telemetry"
+      actions={
+        <button
+          onClick={handleExportCSV}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all hover:border-orange-500"
+          style={{ borderColor: "var(--border)", backgroundColor: "var(--card)", color: "var(--text-primary)" }}
+        >
+          <Download className="w-4 h-4 text-orange-500" />
+          <span>Export CSV</span>
+        </button>
+      }
+    >
+      <div className="space-y-6">
+        {/* Controls Bar */}
+        <div className="ss-card p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2 text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>
+              <Calendar className="w-4 h-4 text-orange-500" />
+              <span>From:</span>
               <input
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500/50 [color-scheme:dark]"
+                className="ss-input py-1 px-3 text-xs"
               />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-slate-400 uppercase tracking-wide">End Date</label>
+              <span>To:</span>
               <input
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500/50 [color-scheme:dark]"
+                className="ss-input py-1 px-3 text-xs"
               />
             </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-slate-400 uppercase tracking-wide">Field</label>
+
+            <div className="flex items-center gap-2 text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>
+              <span>Field:</span>
               <select
                 value={field}
-                onChange={(e) => setField(e.target.value)}
-                className="bg-[#1c1f2e] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500/50"
+                onChange={(e) => { setField(e.target.value); setPage(1); }}
+                className="ss-input py-1 px-3 text-xs font-bold text-orange-500 capitalize"
               >
-                {FIELDS.map((f) => (
-                  <option key={f} value={f}>
-                    {f.charAt(0).toUpperCase() + f.slice(1)}
-                  </option>
-                ))}
+                <option value="power">Power Output (W)</option>
+                <option value="voltage">Voltage (V)</option>
+                <option value="current">Current (A)</option>
+                <option value="irradiance">Irradiance (W/m²)</option>
+                <option value="temperature">Temperature (°C)</option>
               </select>
             </div>
           </div>
+
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search timestamp..."
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
+              className="ss-input pl-9 py-1.5 text-xs w-48 sm:w-64"
+            />
+          </div>
         </div>
 
-        {/* Error state */}
-        {error && !loading ? (
-          <ErrorState message={error} onRetry={fetchData} />
-        ) : (
-        <div className="glass-card overflow-hidden">
-          {loading ? (
-            <div className="p-6 space-y-3">
-              {[...Array(8)].map((_, i) => (
-                <div key={i} className="skeleton h-10 w-full" />
-              ))}
-            </div>
-          ) : data.length === 0 ? (
-            <div className="p-12 text-center text-slate-500 text-sm">
-              No historical data for selected range.
-            </div>
-          ) : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="border-b border-white/5">
-                      <th className="px-4 py-3 text-xs text-slate-500 font-medium uppercase tracking-wide">
-                        #
-                      </th>
-                      <th className="px-4 py-3 text-xs text-slate-500 font-medium uppercase tracking-wide">
-                        Timestamp
-                      </th>
-                      <th className="px-4 py-3 text-xs text-slate-500 font-medium uppercase tracking-wide capitalize">
+        {/* History Table */}
+        <div className="ss-card p-6 overflow-hidden">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-bold" style={{ color: "var(--text-primary)" }}>
+              Recorded Telemetry Log
+            </h3>
+            <span className="text-xs font-semibold" style={{ color: "var(--text-muted)" }}>
+              Total Records: {filteredData.length}
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b" style={{ borderColor: "var(--border)" }}>
+                  <th className="pb-3 font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Timestamp</th>
+                  <th className="pb-3 font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Metric</th>
+                  <th className="pb-3 font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Recorded Value</th>
+                  <th className="pb-3 font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Unit</th>
+                  <th className="pb-3 font-semibold uppercase" style={{ color: "var(--text-muted)" }}>Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
+                {paginatedData.length > 0 ? (
+                  paginatedData.map((row, idx) => (
+                    <tr key={idx} className="transition-colors hover:bg-black/5 dark:hover:bg-white/5">
+                      <td className="py-3 font-mono font-medium" style={{ color: "var(--text-primary)" }}>
+                        {new Date(row.timestamp).toLocaleString()}
+                      </td>
+                      <td className="py-3 font-bold capitalize" style={{ color: "var(--text-primary)" }}>
                         {field}
-                      </th>
+                      </td>
+                      <td className="py-3 font-bold text-orange-500">
+                        {row.value.toFixed(2)}
+                      </td>
+                      <td className="py-3 font-medium" style={{ color: "var(--text-secondary)" }}>
+                        {unitMap[field] || ""}
+                      </td>
+                      <td className="py-3">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-500">
+                          ● Normal
+                        </span>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {pageData.map((row, i) => (
-                      <tr
-                        key={row.timestamp}
-                        className="border-b border-white/5 hover:bg-white/[0.02] transition-colors"
-                      >
-                        <td className="px-4 py-3 text-sm text-slate-500">
-                          {page * PAGE_SIZE + i + 1}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-slate-400">
-                          {new Date(row.timestamp).toLocaleString()}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-white font-medium">
-                          {row.value.toFixed(2)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-xs font-semibold" style={{ color: "var(--text-muted)" }}>
+                      {loading ? "Loading telemetry records..." : "No records found matching query."}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
 
-              {/* Pagination */}
-              <div className="flex items-center justify-between px-4 py-4 border-t border-white/5">
-                <span className="text-sm text-slate-500">
-                  Page {page + 1} of {totalPages} · {data.length} total rows
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setPage((p) => Math.max(0, p - 1))}
-                    disabled={page === 0}
-                    className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                    disabled={page >= totalPages - 1}
-                    className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
+          {/* Pagination Controls */}
+          <div className="flex items-center justify-between mt-6 pt-4 border-t" style={{ borderColor: "var(--border)" }}>
+            <span className="text-xs" style={{ color: "var(--text-muted)" }}>
+              Page {page} of {totalPages}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="p-2 rounded-xl border disabled:opacity-30 transition-all hover:border-orange-500"
+                style={{ borderColor: "var(--border)", backgroundColor: "var(--input-bg)", color: "var(--text-primary)" }}
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="p-2 rounded-xl border disabled:opacity-30 transition-all hover:border-orange-500"
+                style={{ borderColor: "var(--border)", backgroundColor: "var(--input-bg)", color: "var(--text-primary)" }}
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
         </div>
-        )}
-      </main>
-    </div>
+      </div>
+    </AppLayout>
   );
 }
