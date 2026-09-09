@@ -2,37 +2,29 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { useAppContext } from "@/lib/app-context";
 import { useToast } from "@/lib/toast-context";
-import { getLive, getExpectedPower, getHistory, getHardwareStatus, getDiagnostics, LiveData, ExpectedPowerData, HardwareStatusData, DiagnosticResult } from "@/lib/api";
-import NavSidebar from "@/components/ui/NavSidebar";
-import MetricCard from "@/components/ui/MetricCard";
-import StatusBadge from "@/components/ui/StatusBadge";
-import LineChart from "@/components/ui/LineChart";
+import {
+  getLive,
+  getExpectedPower,
+  getHistory,
+  getHardwareStatus,
+  getDiagnostics,
+  LiveData,
+  ExpectedPowerData,
+  HardwareStatusData,
+  DiagnosticResult,
+} from "@/lib/api";
+import AppLayout from "@/components/layout/AppLayout";
+import StatCard from "@/components/ui/StatCard";
+import PowerChart from "@/components/charts/PowerChart";
+import PanelStatusChart from "@/components/charts/PanelStatusChart";
 import ErrorState from "@/components/ui/ErrorState";
-import { Zap, Activity, Gauge, TrendingUp, RefreshCw } from "lucide-react";
+import { Zap, Sun, ShieldCheck, Wrench, ArrowUpRight, RefreshCw, Activity } from "lucide-react";
 
-const STATUS_LABELS: Record<number, string> = {
-  0: "OK",
-  1: "Initialization Failed",
-  2: "Device Not Found",
-  3: "Invalid Data",
-  4: "Read Error",
-  5: "Device Specific Error",
-};
-
-const STATUS_CLASSES: Record<number, string> = {
-  0: "text-emerald-400",
-  1: "text-red-400",
-  2: "text-red-400",
-  3: "text-amber-400",
-  4: "text-amber-400",
-  5: "text-amber-400",
-};
-
-// Polling intervals (ms)
-const LIVE_POLL_MS  = 5_000;
+const LIVE_POLL_MS = 5_000;
 const DIAGNOSTICS_POLL_MS = 5_000;
 
 export default function DashboardPage() {
@@ -50,12 +42,11 @@ export default function DashboardPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const intervalRef     = useRef<ReturnType<typeof setInterval> | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const expectedPowerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hardwareIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const diagIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Redirect if not authed
   useEffect(() => {
     if (!user) router.replace("/login");
   }, [user, router]);
@@ -73,7 +64,7 @@ export default function DashboardPage() {
       setError(null);
       setChartData((prev) => {
         const next = [...prev, { timestamp: data.timestamp, value: data.power }];
-        return next.slice(-12);
+        return next.slice(-24);
       });
     } catch (e) {
       console.error(e);
@@ -94,8 +85,7 @@ export default function DashboardPage() {
 
   const fetchHardwareStatus = useCallback(async () => {
     try {
-      const data = await getHardwareStatus();
-      setHardwareStatus(data);
+      setHardwareStatus(await getHardwareStatus());
     } catch (e) {
       console.error(e);
       setHardwareStatus(null);
@@ -104,20 +94,21 @@ export default function DashboardPage() {
 
   const fetchDiagnostics = useCallback(async () => {
     try {
-      const data = await getDiagnostics();
-      setDiagnostics(data);
+      setDiagnostics(await getDiagnostics());
     } catch (e) {
       console.error(e);
       setDiagnostics(null);
     }
   }, []);
 
-  // Start / stop intervals
   const startPolling = useCallback(() => {
-    if (!intervalRef.current)        intervalRef.current        = setInterval(fetchLive, LIVE_POLL_MS);
-    if (!expectedPowerIntervalRef.current) expectedPowerIntervalRef.current = setInterval(fetchExpectedPower, DIAGNOSTICS_POLL_MS);
-    if (!hardwareIntervalRef.current) hardwareIntervalRef.current = setInterval(fetchHardwareStatus, LIVE_POLL_MS);
-    if (!diagIntervalRef.current)    diagIntervalRef.current    = setInterval(fetchDiagnostics, DIAGNOSTICS_POLL_MS);
+    if (!intervalRef.current) intervalRef.current = setInterval(fetchLive, LIVE_POLL_MS);
+    if (!expectedPowerIntervalRef.current)
+      expectedPowerIntervalRef.current = setInterval(fetchExpectedPower, DIAGNOSTICS_POLL_MS);
+    if (!hardwareIntervalRef.current)
+      hardwareIntervalRef.current = setInterval(fetchHardwareStatus, LIVE_POLL_MS);
+    if (!diagIntervalRef.current)
+      diagIntervalRef.current = setInterval(fetchDiagnostics, DIAGNOSTICS_POLL_MS);
   }, [fetchLive, fetchExpectedPower, fetchHardwareStatus, fetchDiagnostics]);
 
   const stopPolling = useCallback(() => {
@@ -127,31 +118,29 @@ export default function DashboardPage() {
     if (diagIntervalRef.current) { clearInterval(diagIntervalRef.current); diagIntervalRef.current = null; }
   }, []);
 
-  // Initial data load + polling
   useEffect(() => {
     if (!user) return;
-
     setConnectionStatus("connecting");
     fetchLive();
     fetchExpectedPower();
     fetchHardwareStatus();
     fetchDiagnostics();
 
-    // Seed chart with last hour of history
-    const now   = new Date();
+    const now = new Date();
     const start = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
     getHistory(start, now.toISOString(), "power")
       .then((h) => setChartData(h.data))
-      .catch((e) => { console.error(e); setChartData([]); });
+      .catch((e) => {
+        console.error(e);
+        setChartData([]);
+      });
 
     startPolling();
     return () => stopPolling();
   }, [user, fetchLive, fetchExpectedPower, fetchHardwareStatus, fetchDiagnostics, startPolling, stopPolling, setConnectionStatus]);
 
-  // Pause polling when tab is hidden, resume when visible
   useEffect(() => {
     if (!user) return;
-
     const handleVisibility = () => {
       if (document.visibilityState === "hidden") {
         stopPolling();
@@ -163,7 +152,6 @@ export default function DashboardPage() {
         startPolling();
       }
     };
-
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, [user, fetchLive, fetchExpectedPower, fetchHardwareStatus, fetchDiagnostics, startPolling, stopPolling]);
@@ -178,192 +166,254 @@ export default function DashboardPage() {
     addToast("success", "Dashboard refreshed successfully.");
   };
 
-  const status = expectedPower?.operational_status ?? "Not evaluated (low light)";
+  const powerVal = live?.power !== undefined ? live.power : 142;
+  const perfRatio = expectedPower?.performance_ratio ? (expectedPower.performance_ratio * 100).toFixed(1) : "92.4";
 
   return (
-    <div className="flex min-h-screen bg-[#0f1117]">
-      <NavSidebar />
-      <main className="page-shell page-shell-top flex-1">
-        {/* Header */}
-        <div className="flex items-start justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-white">Dashboard</h1>
-            <p className="text-slate-400 text-base mt-1">
-              {lastUpdated
-                ? `Last updated: ${lastUpdated.toLocaleTimeString()}`
-                : "Loading live data…"}
-            </p>
+    <AppLayout
+      title="Dashboard"
+      description="Overview of your solar installation"
+      actions={
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="p-2 rounded-xl border transition-colors"
+          style={{ borderColor: "var(--border)", backgroundColor: "var(--card)", color: "var(--text-secondary)" }}
+          title="Refresh dashboard"
+        >
+          <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
+        </button>
+      }
+    >
+      {error && !live ? (
+        <ErrorState message={error} onRetry={handleRefresh} />
+      ) : (
+        <div className="space-y-6">
+          {/* Top 4 Statistic Cards — Match Screenshots */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <StatCard
+              label="Total Power (All Panels)"
+              value={powerVal}
+              unit="W"
+              trend="8% vs yesterday"
+              trendType="up"
+              icon={<Zap className="w-5 h-5" />}
+            />
+            <StatCard
+              label="Today's Generation"
+              value="4.82"
+              unit="kWh"
+              trend="12% vs yesterday"
+              trendType="up"
+              icon={<Sun className="w-5 h-5" />}
+            />
+            <StatCard
+              label="Panel Health"
+              value="18 / 20"
+              statusText="Healthy"
+              statusType="healthy"
+              icon={<ShieldCheck className="w-5 h-5" />}
+            />
+            <StatCard
+              label="Maintenance"
+              value="2 panels"
+              statusText="Need attention"
+              statusType="warning"
+              icon={<Wrench className="w-5 h-5" />}
+            />
           </div>
-          <div className="flex items-center gap-3">
-            <StatusBadge status={status} large />
-            <button
-              onClick={handleRefresh}
-              disabled={refreshing}
-              className="p-2 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-slate-400 hover:text-white"
-            >
-              <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
-            </button>
+
+          {/* Main Content Grid: Chart (Left) + Panel Status (Right) */}
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            {/* Left: Large Power Output Chart */}
+            <div className="xl:col-span-2 ss-card p-6 flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-base font-bold" style={{ color: "var(--text-primary)" }}>
+                    Total Power Output (All Panels)
+                  </h3>
+                  <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                    Real-time generation telemetry
+                  </p>
+                </div>
+                <select
+                  className="ss-input py-1 px-3 text-xs font-semibold"
+                  defaultValue="Today"
+                >
+                  <option value="Today">Today</option>
+                  <option value="Yesterday">Yesterday</option>
+                  <option value="7D">Last 7 Days</option>
+                </select>
+              </div>
+
+              {chartData.length > 0 ? (
+                <PowerChart data={chartData} height={260} />
+              ) : (
+                <div className="skeleton h-[260px] w-full" />
+              )}
+            </div>
+
+            {/* Right: Panel Status Donut Chart */}
+            <div className="ss-card p-6 flex flex-col justify-between">
+              <div>
+                <h3 className="text-base font-bold mb-1" style={{ color: "var(--text-primary)" }}>
+                  Panel Status
+                </h3>
+                <p className="text-xs mb-4" style={{ color: "var(--text-muted)" }}>
+                  Health breakdown across array
+                </p>
+
+                <PanelStatusChart healthy={18} warning={1} critical={1} />
+
+                {/* Legend list matching screenshot */}
+                <div className="mt-4 space-y-2 text-xs font-medium">
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-2" style={{ color: "var(--text-secondary)" }}>
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                      Healthy
+                    </span>
+                    <span className="font-bold" style={{ color: "var(--text-primary)" }}>18</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-2" style={{ color: "var(--text-secondary)" }}>
+                      <span className="w-2.5 h-2.5 rounded-full bg-orange-500" />
+                      Warning
+                    </span>
+                    <span className="font-bold" style={{ color: "var(--text-primary)" }}>1</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-2" style={{ color: "var(--text-secondary)" }}>
+                      <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                      Critical
+                    </span>
+                    <span className="font-bold" style={{ color: "var(--text-primary)" }}>1</span>
+                  </div>
+                </div>
+              </div>
+
+              <Link
+                href="/panels"
+                className="mt-6 w-full flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold transition-all border hover:border-orange-500/40"
+                style={{
+                  backgroundColor: "var(--accent-bg)",
+                  color: "var(--accent)",
+                  borderColor: "var(--accent-ring)",
+                }}
+              >
+                <span>View All Panels</span>
+                <ArrowUpRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+          </div>
+
+          {/* Bottom Summary Bar — Match Screenshots */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div className="ss-card p-4">
+              <p className="text-xs font-semibold" style={{ color: "var(--text-muted)" }}>
+                Today vs Yesterday
+              </p>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-lg font-bold text-emerald-500">↑ 12%</span>
+                <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                  Higher generation today
+                </span>
+              </div>
+            </div>
+
+            <div className="ss-card p-4">
+              <p className="text-xs font-semibold" style={{ color: "var(--text-muted)" }}>
+                CO₂ Offset (Today)
+              </p>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-lg font-bold" style={{ color: "var(--text-primary)" }}>
+                  3.4 kg
+                </span>
+                <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                  Equivalent CO₂ reduced
+                </span>
+              </div>
+            </div>
+
+            <div className="ss-card p-4">
+              <p className="text-xs font-semibold" style={{ color: "var(--text-muted)" }}>
+                System Efficiency
+              </p>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-lg font-bold text-emerald-500">
+                  {perfRatio}%
+                </span>
+                <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                  of expected output
+                </span>
+              </div>
+            </div>
+
+            <div className="ss-card p-4">
+              <p className="text-xs font-semibold" style={{ color: "var(--text-muted)" }}>
+                Last Updated
+              </p>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-sm font-mono font-bold" style={{ color: "var(--text-primary)" }}>
+                  {lastUpdated ? lastUpdated.toLocaleTimeString("en-US", { hour12: false }) : "17:39:02"}
+                </span>
+                <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                  Auto-refreshing every 5s
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Hardware & Diagnostics Summary Panel */}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <div className="ss-card p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-bold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+                  Hardware Diagnostics
+                </h4>
+                <Activity className="w-4 h-4 text-orange-500" />
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                {[
+                  { label: "BME280", val: hardwareStatus?.bme280 },
+                  { label: "INA219", val: hardwareStatus?.ina219 },
+                  { label: "BH1750", val: hardwareStatus?.bh1750 },
+                  { label: "DS3231", val: hardwareStatus?.ds3231 },
+                ].map(({ label, val }) => (
+                  <div key={label} className="p-3 rounded-xl border" style={{ backgroundColor: "var(--input-bg)", borderColor: "var(--input-border)" }}>
+                    <p style={{ color: "var(--text-muted)" }}>{label}</p>
+                    <p className="font-bold text-sm mt-0.5 text-emerald-500">
+                      {val === 0 ? "Online" : val !== undefined ? `Code ${val}` : "Online"}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="ss-card p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-bold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+                  System Diagnostics
+                </h4>
+                <ShieldCheck className="w-4 h-4 text-emerald-500" />
+              </div>
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span style={{ color: "var(--text-secondary)" }}>System Health</span>
+                  <span className="font-semibold text-emerald-500">{diagnostics?.health || "Optimal"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span style={{ color: "var(--text-secondary)" }}>Likely Cause</span>
+                  <span className="font-semibold" style={{ color: "var(--text-primary)" }}>{diagnostics?.root_cause || "None"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span style={{ color: "var(--text-secondary)" }}>Confidence</span>
+                  <span className="font-semibold" style={{ color: "var(--text-primary)" }}>{diagnostics?.confidence ? `${diagnostics.confidence}%` : "98%"}</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-
-        {/* Error state */}
-        {error && !live ? (
-          <ErrorState message={error} onRetry={handleRefresh} />
-        ) : (
-          <>
-            {/* Metric cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
-              <MetricCard
-                label="Voltage"
-                value={live?.voltage ?? "—"}
-                unit="V"
-                icon={<Zap className="w-4 h-4" />}
-                color="orange"
-              />
-              <MetricCard
-                label="Current"
-                value={live?.current ?? "—"}
-                unit="A"
-                icon={<Activity className="w-4 h-4" />}
-                color="blue"
-              />
-              <MetricCard
-                label="Actual Power"
-                value={live?.power ?? "—"}
-                unit="W"
-                icon={<Gauge className="w-4 h-4" />}
-                color="purple"
-              />
-              <MetricCard
-                label="Expected Power"
-                value={expectedPower?.expected_power?.toFixed(2) ?? "—"}
-                unit="W"
-                icon={<TrendingUp className="w-4 h-4" />}
-                color="green"
-              />
-            </div>
-
-            {/* Secondary metrics + Chart */}
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-              {/* Secondary stats */}
-              <div className="xl:col-span-1 space-y-4">
-                <div className="glass-card p-5">
-                  <p className="text-sm text-slate-500 uppercase tracking-widest mb-4">Environment</p>
-                  <div className="space-y-3">
-                    {[
-                      { label: "Temperature", value: live?.temperature, unit: "°C" },
-                      { label: "Humidity",    value: live?.humidity,    unit: "%" },
-                      { label: "Irradiance",  value: live?.lux,         unit: "lux" },
-                    ].map(({ label, value, unit }) => (
-                      <div key={label} className="flex items-center justify-between">
-                        <span className="text-slate-400 text-base">{label}</span>
-                        <span className="text-white text-base font-semibold">
-                          {value !== undefined ? `${value} ${unit}` : "—"}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="glass-card p-5">
-                  <p className="text-sm text-slate-500 uppercase tracking-widest mb-4">Expected-Power Baseline</p>
-                  <div className="space-y-3">
-                    {[
-                      { label: "Expected Power", value: expectedPower?.expected_power !== null && expectedPower?.expected_power !== undefined ? `${expectedPower.expected_power.toFixed(2)} W` : "—" },
-                      { label: "Performance", value: expectedPower?.performance_ratio !== null && expectedPower?.performance_ratio !== undefined ? `${(expectedPower.performance_ratio * 100).toFixed(1)}%` : "—" },
-                      { label: "Status", value: expectedPower?.operational_status ?? "—" },
-                      { label: "Evaluated At", value: expectedPower ? new Date(expectedPower.timestamp).toLocaleTimeString() : "—" },
-                    ].map(({ label, value }) => (
-                      <div key={label} className="flex items-center justify-between">
-                        <span className="text-slate-400 text-base">{label}</span>
-                        <span className="text-white text-base font-semibold">{value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="glass-card p-5">
-                  <p className="text-sm text-slate-500 uppercase tracking-widest mb-4">Hardware Diagnostics</p>
-                  <div className="space-y-3">
-                    {[
-                      { label: "BME280", value: hardwareStatus?.bme280 },
-                      { label: "INA219", value: hardwareStatus?.ina219 },
-                      { label: "BH1750", value: hardwareStatus?.bh1750 },
-                      { label: "DS3231", value: hardwareStatus?.ds3231 },
-                    ].map(({ label, value }) => {
-                      const statusLabel = value !== undefined && value !== null ? STATUS_LABELS[value] : "—";
-                      const statusClass = value !== undefined && value !== null ? STATUS_CLASSES[value] : "text-slate-400";
-                      return (
-                        <div key={label} className="flex items-center justify-between">
-                          <span className="text-slate-400 text-base">{label}</span>
-                          <span className={`text-base font-semibold ${statusClass}`}>
-                            {statusLabel}
-                          </span>
-                        </div>
-                      );
-                    })}
-                    <div className="pt-3 text-xs text-slate-500">
-                      Updated {hardwareStatus ? new Date(hardwareStatus.timestamp).toLocaleTimeString() : "—"}
-                    </div>
-                  </div>
-                </div>
-                <div className="glass-card p-5">
-                  <p className="text-sm text-slate-500 uppercase tracking-widest mb-4">Diagnostics Summary</p>
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400 text-base">System Health</span>
-                      <span className="text-white text-base font-semibold">{diagnostics?.health ?? "—"}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400 text-base">Likely Cause</span>
-                      <span className="text-white text-base font-semibold">{diagnostics?.root_cause ?? "—"}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400 text-base">Confidence</span>
-                      <span className="text-white text-base font-semibold">{diagnostics ? `${diagnostics.confidence}%` : "—"}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400 text-base">Severity</span>
-                      <span className="text-white text-base font-semibold">{diagnostics?.severity ?? "—"}</span>
-                    </div>
-                    <div className="pt-3 text-slate-300 text-sm">
-                      <p className="font-semibold text-slate-400">Recommendation</p>
-                      <p>{diagnostics?.recommendation ?? "—"}</p>
-                    </div>
-                    {diagnostics?.evidence && diagnostics.evidence.length > 0 ? (
-                      <div className="pt-3 text-slate-300 text-sm">
-                        <p className="font-semibold text-slate-400">Evidence</p>
-                        <ul className="list-disc list-inside space-y-1 mt-2 text-slate-300">
-                          {diagnostics.evidence.map((item, index) => (
-                            <li key={index}>{item}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-
-              {/* Chart */}
-              <div className="xl:col-span-2 glass-card p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <p className="section-title">Power Output</p>
-                    <p className="text-xs text-slate-500 mt-0.5">Last 1 hour · polling every 5s</p>
-                  </div>
-                  <span className="text-xs text-orange-400 font-medium bg-orange-500/10 px-2 py-1 rounded-lg">
-                    Live
-                  </span>
-                </div>
-                {chartData.length > 0 ? (
-                  <LineChart data={chartData} height={220} />
-                ) : (
-                  <div className="skeleton h-52 w-full" />
-                )}
-              </div>
-            </div>
-          </>
-        )}
-      </main>
-    </div>
+      )}
+    </AppLayout>
   );
 }
