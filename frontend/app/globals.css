@@ -13,8 +13,11 @@
     box-sizing: border-box;
   }
 
-  html {
+  html, body {
+    background-color: #0b0f17;
+    color: #f3f4f6;
     scroll-behavior: smooth;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
   }
 
   ::selection {
@@ -32,8 +35,12 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.12);
     border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.25);
   }
 }
 
@@ -41,7 +48,7 @@
   /* On mobile: no left margin (sidebar overlays).
      On lg+: shift content right of the 256px sidebar. */
   .page-shell {
-    @apply ml-0 lg:ml-64 min-h-screen p-4 sm:p-6 lg:p-8 bg-[#0f1117];
+    @apply ml-0 lg:ml-64 min-h-screen p-4 sm:p-6 lg:p-8 bg-[#0b0f17];
   }
 
   /* Top bar spacer on mobile so content doesn't hide under the nav bar */
@@ -49,19 +56,28 @@
     @apply pt-16 lg:pt-0;
   }
 
+  /* Refined dark card matching reference designs */
+  .solar-card {
+    @apply rounded-2xl bg-[#121824] border border-[#1e293b]/70 backdrop-blur-md transition-all duration-200;
+  }
+
+  .solar-card-hover {
+    @apply hover:border-slate-700 hover:shadow-lg hover:shadow-black/40;
+  }
+
   .glass-card {
-    @apply rounded-2xl bg-white/[0.03] border border-white/[0.07] backdrop-blur-sm;
+    @apply rounded-2xl bg-[#121824] border border-[#1e293b]/70 backdrop-blur-md;
   }
 
   .section-title {
-    @apply text-xl font-semibold text-white;
+    @apply text-xl font-bold text-white tracking-tight;
   }
 
   .section-sub {
-    @apply text-base text-slate-400;
+    @apply text-sm text-slate-400 font-normal;
   }
 
-  /* Shimmer skeleton — replaces animate-pulse with a moving highlight sweep */
+  /* Shimmer skeleton */
   .skeleton {
     @apply bg-white/[0.04] rounded-xl relative overflow-hidden;
   }
@@ -81,26 +97,34 @@
 
   /* Mobile sidebar overlay backdrop */
   .sidebar-overlay {
-    @apply fixed inset-0 bg-black/60 backdrop-blur-sm z-30 lg:hidden;
+    @apply fixed inset-0 bg-black/70 backdrop-blur-sm z-30 lg:hidden;
+  }
+
+  /* Custom glow classes for card icons */
+  .glow-orange {
+    box-shadow: 0 0 20px -3px rgba(249, 115, 22, 0.25);
+  }
+  .glow-blue {
+    box-shadow: 0 0 20px -3px rgba(56, 189, 248, 0.25);
+  }
+  .glow-purple {
+    box-shadow: 0 0 20px -3px rgba(168, 85, 247, 0.25);
+  }
+  .glow-green {
+    box-shadow: 0 0 20px -3px rgba(16, 185, 129, 0.25);
   }
 
   /* ─── Animations ──────────────────────────────────────────────────── */
   @keyframes fade-in {
-    from {
-      opacity: 0;
-    }
-
-    to {
-      opacity: 1;
-    }
+    from { opacity: 0; }
+    to   { opacity: 1; }
   }
 
   @keyframes fade-in-up {
     from {
       opacity: 0;
-      transform: translateY(20px);
+      transform: translateY(16px);
     }
-
     to {
       opacity: 1;
       transform: translateY(0);
@@ -108,13 +132,8 @@
   }
 
   @keyframes slide-in-left {
-    from {
-      transform: translateX(-100%);
-    }
-
-    to {
-      transform: translateX(0);
-    }
+    from { transform: translateX(-100%); }
+    to   { transform: translateX(0); }
   }
 
   @keyframes shimmer {
@@ -122,17 +141,12 @@
     to   { transform: translateX(100%); }
   }
 
-  @keyframes toast-drain {
-    from { width: 100%; }
-    to   { width: 0%; }
-  }
-
   .animate-fade-in {
-    animation: fade-in 1s ease-out forwards;
+    animation: fade-in 0.3s ease-out forwards;
   }
 
   .animate-fade-in-up {
-    animation: fade-in-up 1s ease-out forwards;
+    animation: fade-in-up 0.4s ease-out forwards;
   }
 
   .animate-slide-in-left {

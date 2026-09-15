@@ -116,7 +116,7 @@ export default function MaintenancePage() {
   const u = urgencyStyles[urgency];
 
   return (
-    <div className="flex min-h-screen bg-[#0f1117]">
+    <div className="flex min-h-screen bg-[#0b0f17]">
       <NavSidebar />
       <main className="page-shell page-shell-top flex-1">
         <div className="mb-8">

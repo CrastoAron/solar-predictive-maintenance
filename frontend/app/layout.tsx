@@ -20,7 +20,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className={`${inter.className} bg-[#0f1117] text-white antialiased`}>
+      <body className={`${inter.className} bg-[#0b0f17] text-white antialiased`}>
         <AppProvider>
           <ToastProvider>
             <AuthProvider>{children}</AuthProvider>

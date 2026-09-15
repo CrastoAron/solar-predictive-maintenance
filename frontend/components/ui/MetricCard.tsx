@@ -7,102 +7,104 @@ interface MetricCardProps {
   value: string | number;
   unit?: string;
   icon?: ReactNode;
-  trend?: "up" | "down" | "neutral";
-  trendValue?: string;
-  color?: "orange" | "blue" | "green" | "purple";
+  color?: "orange" | "blue" | "purple" | "green" | "amber" | "red";
+  trend?: string;
+  subtext?: string;
 }
 
-const colorMap = {
+const COLOR_STYLES = {
   orange: {
-    bg: "from-orange-500/10 to-orange-500/5",
-    icon: "bg-orange-500/15 text-orange-400",
-    value: "text-orange-400",
     border: "border-orange-500/20",
-    glow: "shadow-orange-500/10",
+    bg: "bg-[#141924]",
+    iconBg: "bg-orange-500/15 text-orange-400 border border-orange-500/30",
+    value: "text-orange-400",
+    glow: "hover:border-orange-500/40 shadow-orange-900/10",
   },
   blue: {
-    bg: "from-blue-500/10 to-blue-500/5",
-    icon: "bg-blue-500/15 text-blue-400",
-    value: "text-blue-400",
-    border: "border-blue-500/20",
-    glow: "shadow-blue-500/10",
-  },
-  green: {
-    bg: "from-emerald-500/10 to-emerald-500/5",
-    icon: "bg-emerald-500/15 text-emerald-400",
-    value: "text-emerald-400",
-    border: "border-emerald-500/20",
-    glow: "shadow-emerald-500/10",
+    border: "border-sky-500/20",
+    bg: "bg-[#141924]",
+    iconBg: "bg-sky-500/15 text-sky-400 border border-sky-500/30",
+    value: "text-sky-400",
+    glow: "hover:border-sky-500/40 shadow-sky-900/10",
   },
   purple: {
-    bg: "from-violet-500/10 to-violet-500/5",
-    icon: "bg-violet-500/15 text-violet-400",
-    value: "text-violet-400",
-    border: "border-violet-500/20",
-    glow: "shadow-violet-500/10",
+    border: "border-purple-500/20",
+    bg: "bg-[#141924]",
+    iconBg: "bg-purple-500/15 text-purple-400 border border-purple-500/30",
+    value: "text-purple-400",
+    glow: "hover:border-purple-500/40 shadow-purple-900/10",
+  },
+  green: {
+    border: "border-emerald-500/20",
+    bg: "bg-[#141924]",
+    iconBg: "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30",
+    value: "text-emerald-400",
+    glow: "hover:border-emerald-500/40 shadow-emerald-900/10",
+  },
+  amber: {
+    border: "border-amber-500/20",
+    bg: "bg-[#141924]",
+    iconBg: "bg-amber-500/15 text-amber-400 border border-amber-500/30",
+    value: "text-amber-400",
+    glow: "hover:border-amber-500/40 shadow-amber-900/10",
+  },
+  red: {
+    border: "border-red-500/20",
+    bg: "bg-[#141924]",
+    iconBg: "bg-red-500/15 text-red-400 border border-red-500/30",
+    value: "text-red-400",
+    glow: "hover:border-red-500/40 shadow-red-900/10",
   },
 };
-
-function formatMetricValue(value: number): string {
-  if (value === 0 || Number.isInteger(value)) return value.toFixed(0);
-
-  const magnitude = Math.abs(value);
-  if (magnitude < 0.01) return value.toFixed(4);
-  if (magnitude < 1) return value.toFixed(3);
-  return value.toFixed(2);
-}
 
 export default function MetricCard({
   label,
   value,
   unit,
   icon,
-  trend,
-  trendValue,
   color = "orange",
+  trend,
+  subtext,
 }: MetricCardProps) {
-  const c = colorMap[color];
+  const style = COLOR_STYLES[color] || COLOR_STYLES.orange;
 
   return (
     <div
-      className={`relative rounded-2xl border ${c.border} bg-gradient-to-br ${c.bg} backdrop-blur-sm p-5 shadow-xl ${c.glow} overflow-hidden transition-transform duration-200 hover:-translate-y-0.5`}
+      className={`rounded-2xl ${style.bg} border ${style.border} p-5 flex flex-col justify-between transition-all duration-300 ${style.glow} shadow-lg`}
     >
-      {/* Decorative circle */}
-      <div className="absolute -top-6 -right-6 w-24 h-24 rounded-full bg-white/[0.02] border border-white/5" />
-
-      <div className="flex items-start justify-between mb-4">
-        <span className="text-slate-400 text-xs font-medium uppercase tracking-widest">
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
           {label}
         </span>
         {icon && (
-          <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${c.icon}`}>
+          <div className={`p-2.5 rounded-xl ${style.iconBg} flex items-center justify-center flex-shrink-0`}>
             {icon}
           </div>
         )}
       </div>
 
-      <div className="flex items-end gap-1.5">
-        <span className={`text-3xl font-bold ${c.value} leading-none`}>
-          {typeof value === "number" ? formatMetricValue(value) : value}
-        </span>
-        {unit && <span className="text-slate-400 text-sm mb-0.5">{unit}</span>}
-      </div>
-
-      {trendValue && (
-        <div className="mt-3 flex items-center gap-1.5">
-          <span
-            className={`text-xs font-medium ${trend === "up"
-                ? "text-emerald-400"
-                : trend === "down"
-                  ? "text-red-400"
-                  : "text-slate-400"
-              }`}
-          >
-            {trend === "up" ? "↑" : trend === "down" ? "↓" : "→"} {trendValue}
+      <div className="mt-1">
+        <div className="flex items-baseline gap-1.5 flex-wrap">
+          <span className={`text-3xl sm:text-4xl font-extrabold tracking-tight ${style.value}`}>
+            {value}
           </span>
-          <span className="text-slate-500 text-xs">vs last hour</span>
+          {unit && (
+            <span className="text-lg font-bold text-slate-300 uppercase">
+              {unit}
+            </span>
+          )}
         </div>
-      )}
+
+        {trend && (
+          <p className="text-xs font-semibold text-emerald-400 mt-2 flex items-center gap-1">
+            {trend}
+          </p>
+        )}
+
+        {subtext && (
+          <p className="text-xs text-slate-400 mt-1 font-medium">{subtext}</p>
+        )}
+      </div>
     </div>
   );
 }
