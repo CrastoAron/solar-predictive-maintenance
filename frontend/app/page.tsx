@@ -1,13 +1,6 @@
-import Hero from "@/components/landing/Hero";
-import Features from "@/components/landing/Features";
-import Footer from "@/components/landing/Footer";
+import { redirect } from "next/navigation";
 
-export default function LandingPage() {
-  return (
-    <div className="flex flex-col min-h-screen">
-      <Hero />
-      <Features />
-      <Footer />
-    </div>
-  );
+export default function Home() {
+  redirect("/dashboard");
 }
+

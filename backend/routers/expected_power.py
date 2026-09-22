@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from config import DEFAULT_DEVICE_ID
-from dependencies import get_current_user
+from dependencies import customer_device_id, get_current_user
 from models.schemas import ExpectedPowerResponse
 from services.expected_power_runner import get_expected_power_runner
 from services.influx_client import get_influx_client
@@ -13,10 +13,11 @@ router = APIRouter()
 
 @router.get("/api/expected-power", response_model=ExpectedPowerResponse | None)
 async def get_expected_power(
-    device_id: str = Query(default=DEFAULT_DEVICE_ID),
+    device_id: str | None = Query(default=None),
     user: dict = Depends(get_current_user),
 ):
-    telemetry = get_influx_client().get_latest_sensor(device_id)
+    resolved_device_id = customer_device_id(user, device_id)
+    telemetry = get_influx_client().get_latest_sensor(resolved_device_id)
     if telemetry is None:
         return None
 

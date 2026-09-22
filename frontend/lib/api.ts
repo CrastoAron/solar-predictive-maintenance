@@ -27,12 +27,39 @@ export interface HistoryData {
   data: HistoryPoint[];
 }
 
-export interface PredictionData {
-  fault_class: number;
-  fault_label: string;
-  efficiency_score: number;
-  maintenance_days: number;
-  predicted_at: string;
+export interface PanelData {
+  id: string;
+  name: string;
+  esp32_id: string | null;
+  array_id: string;
+  cell_rows: number;
+  cell_cols: number;
+  row_index: number;
+  col_index: number;
+  panel_width_mm: number | null;
+  panel_height_mm: number | null;
+  rated_voltage: number | null;
+  rated_current: number | null;
+  rated_power: number | null;
+  setup: {
+    id: string;
+    name: string;
+    rows: number;
+    cols: number;
+  };
+}
+
+export interface MaintenanceTask {
+  id: string;
+  panel_id: string | null;
+  task_name: string;
+  task_type: string;
+  status: string;
+  priority: string;
+  scheduled_date: string | null;
+  completed_date?: string | null;
+  assigned_to: string | null;
+  description: string | null;
 }
 
 export interface Alert {
@@ -48,19 +75,6 @@ export interface AlertsData {
   alerts: Alert[];
 }
 
-export interface MaintenanceData {
-  days_remaining: number;
-  next_service_date: string;
-  efficiency_trend: "improving" | "stable" | "declining";
-  recommendation: string;
-  when_to_clean?: string | null;
-  panel_damaged?: boolean | null;
-  panel_health?: string | null;
-  active_alert_count: number;
-  highest_alert_severity?: "high" | "medium" | "low" | null;
-  alert_message?: string | null;
-  maintenance_trigger?: string | null;
-}
 export interface HardwareStatusData {
   device_id: string;
   timestamp: string;
@@ -88,12 +102,37 @@ export interface DiagnosticResult {
   recommendation: string;
 }
 
+export interface MaintenanceData {
+  days_remaining: number;
+  next_service_date: string | null;
+  efficiency_trend: string;
+  recommendation: string;
+  when_to_clean: string | null;
+  panel_damaged: boolean | null;
+  panel_health: string | null;
+  active_alert_count: number;
+  highest_alert_severity: string | null;
+  alert_message: string | null;
+  maintenance_trigger: string | null;
+}
+
+export interface PredictionData {
+  fault_class: number;
+  fault_label: string;
+  efficiency_score: number;
+  maintenance_days: number;
+  predicted_at: string;
+}
+
 // ── Core fetch helper ─────────────────────────────────────────────────────
 
 async function apiFetch<T>(path: string): Promise<T> {
   try {
     const currentAuth = auth;
-    const token = currentAuth ? await currentAuth.currentUser?.getIdToken() : null;
+    const firebaseToken = currentAuth ? await currentAuth.currentUser?.getIdToken() : null;
+    const storedFirebaseToken = typeof window !== "undefined" ? localStorage.getItem("firebase-token") : null;
+    const adminToken = typeof window !== "undefined" ? localStorage.getItem("admin-token") : null;
+    const token = firebaseToken || storedFirebaseToken || adminToken;
     if (!token) throw new Error("No auth token");
 
     const res = await fetch(API_BASE + path, {
@@ -131,51 +170,50 @@ async function apiFetch<T>(path: string): Promise<T> {
 
 // ── Exported API functions ────────────────────────────────────────────────
 
-export const getLive = () => apiFetch<LiveData | null>("/api/live");
+export const getLive = (deviceId?: string) => {
+  const params = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : "";
+  return apiFetch<LiveData | null>(`/api/live${params}`);
+};
 
 export const getHistory = (
-  start: string,
-  end: string,
-  field: string
-) =>
-  fetch(`/api/history?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&field=${encodeURIComponent(field)}`, {
-    headers: {
-      "Content-Type": "application/json",
-    },
-  }).then(async (res) => {
-    if (!res.ok) throw new Error(`History request failed: ${res.status}`);
-    return (await res.json()) as HistoryData;
-  });
+  start: string | null,
+  end: string | null,
+  field: string,
+  deviceId?: string
+) => {
+  const params = new URLSearchParams({ field });
+  if (start && end) {
+    params.set("start", start);
+    params.set("end", end);
+  }
+  if (deviceId) params.set("device_id", deviceId);
+  return apiFetch<HistoryData>(`/api/history?${params.toString()}`);
+};
 
-export interface HistoryMeta {
-  earliest: string | null;
-  folders: { name: string; earliest: string | null }[];
-}
+export const getPanels = () => apiFetch<PanelData[]>("/api/panels");
 
-export const getHistoryMeta = () =>
-  fetch("/api/history/meta", {
-    headers: {
-      "Content-Type": "application/json",
-    },
-  }).then(async (res) => {
-    if (!res.ok) throw new Error(`History meta request failed: ${res.status}`);
-    return (await res.json()) as HistoryMeta;
-  });
-
-export const getPredictions = () =>
-  apiFetch<PredictionData | null>("/api/predictions");
+export const getServiceHistory = () => apiFetch<MaintenanceTask[]>("/api/service-history");
 
 export const getAlerts = () =>
   apiFetch<AlertsData>("/api/alerts");
 
-export const getMaintenance = () =>
-  apiFetch<MaintenanceData | null>("/api/maintenance");
+export const getHardwareStatus = (deviceId?: string) => {
+  const params = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : "";
+  return apiFetch<HardwareStatusData | null>(`/api/hardware-status${params}`);
+};
 
-export const getHardwareStatus = () =>
-  apiFetch<HardwareStatusData | null>("/api/hardware-status");
-
-export const getExpectedPower = () =>
-  apiFetch<ExpectedPowerData | null>("/api/expected-power");
+export const getExpectedPower = (deviceId?: string) => {
+  const params = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : "";
+  return apiFetch<ExpectedPowerData | null>(`/api/expected-power${params}`);
+};
 
 export const getDiagnostics = () =>
   apiFetch<DiagnosticResult | null>("/api/diagnostics");
+
+export const getMaintenance = () =>
+  apiFetch<MaintenanceData | null>("/api/maintenance");
+
+export const getPredictions = (deviceId?: string) => {
+  const params = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : "";
+  return apiFetch<PredictionData | null>(`/api/predictions${params}`);
+};

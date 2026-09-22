@@ -85,3 +85,32 @@ drop trigger if exists panels_set_updated_at on public.panels;
 create trigger panels_set_updated_at
 before update on public.panels
 for each row execute function public.set_updated_at();
+
+create table if not exists public.maintenance_tasks (
+  id uuid primary key,
+  customer_id uuid not null references public.customers(id) on delete cascade,
+  panel_id uuid references public.panels(id) on delete set null,
+  task_name text not null,
+  task_type text not null default 'Inspection',
+  status text not null default 'Scheduled',
+  priority text not null default 'Medium',
+  scheduled_date timestamptz,
+  completed_date timestamptz,
+  assigned_to text,
+  description text,
+  estimated_duration_minutes integer,
+  checklist jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists maintenance_tasks_customer_id_idx on public.maintenance_tasks(customer_id);
+create index if not exists maintenance_tasks_panel_id_idx on public.maintenance_tasks(panel_id);
+
+alter table public.maintenance_tasks enable row level security;
+
+drop trigger if exists maintenance_tasks_set_updated_at on public.maintenance_tasks;
+create trigger maintenance_tasks_set_updated_at
+before update on public.maintenance_tasks
+for each row execute function public.set_updated_at();
+

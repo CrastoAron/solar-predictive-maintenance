@@ -13,7 +13,6 @@ import {
   MoreHorizontal,
   ArrowUpDown,
   Download,
-  CheckCircle2,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -24,98 +23,84 @@ import {
   Tooltip,
   CartesianGrid,
 } from "recharts";
-
-const ENERGY_DATA = [
-  { date: "Aug 6", val: 240 },
-  { date: "Aug 8", val: 320 },
-  { date: "Aug 10", val: 280 },
-  { date: "Aug 12", val: 410 },
-  { date: "Aug 14", val: 350 },
-  { date: "Aug 16", val: 310 },
-  { date: "Aug 18", val: 290 },
-  { date: "Aug 20", val: 440 },
-  { date: "Aug 21", val: 612 },
-  { date: "Aug 23", val: 480 },
-  { date: "Aug 25", val: 450 },
-  { date: "Aug 27", val: 420 },
-  { date: "Aug 29", val: 390 },
-  { date: "Aug 31", val: 350 },
-  { date: "Sep 3", val: 310 },
-];
-
-const SERVICE_RECORDS = [
-  {
-    id: "s-1",
-    date: "Sep 2, 2026",
-    service: "Panel cleaning",
-    scope: "P-05",
-    performedBy: "SolarTech",
-    status: "Completed",
-    notes: "Performance restored",
-  },
-  {
-    id: "s-2",
-    date: "Aug 14, 2026",
-    service: "Wiring inspection",
-    scope: "P-03",
-    performedBy: "SolarTech",
-    status: "Completed",
-    notes: "No issues found",
-  },
-  {
-    id: "s-3",
-    date: "Jul 21, 2026",
-    service: "Routine inspection",
-    scope: "All Panels",
-    performedBy: "In-house",
-    status: "Completed",
-    notes: "System healthy",
-  },
-  {
-    id: "s-4",
-    date: "Jun 8, 2026",
-    service: "Panel cleaning",
-    scope: "P-01",
-    performedBy: "SolarTech",
-    status: "Completed",
-    notes: "Removed dust buildup",
-  },
-  {
-    id: "s-5",
-    date: "Apr 16, 2026",
-    service: "Inverter check",
-    scope: "All Panels",
-    performedBy: "SolarTech",
-    status: "Completed",
-    notes: "Normal operation",
-  },
-];
+import { getPanels, getServiceHistory, HistoryPoint, MaintenanceTask, PanelData } from "@/lib/api";
+import { getTelemetryRows } from "@/lib/telemetry-csv";
 
 export default function HistoryPage() {
   const { user } = useAuth();
   const router = useRouter();
 
   const [scope, setScope] = useState("Entire Installation");
-  const [timeRange, setTimeRange] = useState("30 Days");
+  const [timeRange, setTimeRange] = useState("Last 30 days");
   const [genRange, setGenRange] = useState("30 Days");
+  const [energyData, setEnergyData] = useState<HistoryPoint[]>([]);
+  const [serviceRecords, setServiceRecords] = useState<MaintenanceTask[]>([]);
+  const [panels, setPanels] = useState<PanelData[]>([]);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [serviceError, setServiceError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) router.replace("/login");
   }, [user, router]);
 
+  useEffect(() => {
+    if (!user) return;
+    const days = genRange === "7 Days" ? 7 : genRange === "3 Months" ? 90 : genRange === "1 Year" ? 365 : 30;
+    getTelemetryRows()
+      .then((rows) => {
+        const end = new Date(Math.max(...rows.map((row) => Date.parse(row.timestamp))));
+        const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
+        setEnergyData(rows
+          .filter((row) => Date.parse(row.timestamp) >= start.getTime() && Date.parse(row.timestamp) <= end.getTime())
+          .map((row) => ({ timestamp: row.timestamp, value: row.power })));
+        setHistoryError(null);
+      })
+      .catch(() => {
+        setEnergyData([]);
+        setHistoryError("Energy history is unavailable.");
+      });
+  }, [user, genRange]);
+
+  useEffect(() => {
+    if (!user) return;
+    Promise.all([getPanels(), getServiceHistory()])
+      .then(([panelRecords, tasks]) => {
+        setPanels(panelRecords);
+        setServiceRecords(tasks);
+        setServiceError(null);
+      })
+      .catch(() => {
+        setPanels([]);
+        setServiceRecords([]);
+        setServiceError("Service history is unavailable.");
+      });
+  }, [user]);
+
+  const chartData = energyData.map((point) => ({
+    timestamp: point.timestamp,
+    date: new Date(point.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    val: point.value,
+  }));
+  const totalGeneration = energyData.reduce((total, point) => total + point.value, 0);
+  const averageGeneration = energyData.length ? totalGeneration / energyData.length : 0;
+  const bestPoint = energyData.reduce<HistoryPoint | null>((best, point) => !best || point.value > best.value ? point : best, null);
+
   const exportCSV = () => {
     const header = "Date,Service,Scope,PerformedBy,Status,Notes\n";
-    const rows = SERVICE_RECORDS.map(
-      (r) => `${r.date},${r.service},${r.scope},${r.performedBy},${r.status},${r.notes}`
+    const rows = serviceRecords.map(
+      (record) => `${record.scheduled_date || ""},${record.task_name},${getPanelName(record.panel_id)},${record.assigned_to || "Unassigned"},${record.status},${record.description || ""}`
     ).join("\n");
     const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `solar-service-history.csv`;
+    a.download = "solar-service-history.csv";
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  const getPanelName = (panelId: string | null) =>
+    panels.find((panel) => panel.id === panelId)?.name || "Entire Installation";
 
   return (
     <div className="flex min-h-screen bg-[#0b0f17]">
@@ -168,9 +153,9 @@ export default function HistoryPage() {
           <div className="solar-card p-6">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
               <div>
-                <h2 className="text-base font-bold text-white tracking-tight">Energy Generation</h2>
+                <h2 className="text-base font-bold text-white tracking-tight">Power History</h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Total energy produced by your solar installation
+                  Power readings returned by your solar installation
                 </p>
               </div>
 
@@ -194,14 +179,19 @@ export default function HistoryPage() {
 
             {/* Grid layout: Bar Chart (left) + Metrics Column (right) */}
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-              <div className="xl:col-span-8 pt-2">
-                <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={ENERGY_DATA} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+              <div className="xl:col-span-9 pt-2">
+                <ResponsiveContainer width="100%" height={360}>
+                  <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                     <XAxis dataKey="date" tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} />
                     <Tooltip
-                      formatter={(val: any) => [`${val} Wh`, "Energy"]}
+                      shared={false}
+                      labelFormatter={(_, payload) => {
+                        const timestamp = payload?.[0]?.payload?.timestamp;
+                        return timestamp ? new Date(timestamp).toLocaleString() : "Power reading";
+                      }}
+                      formatter={(val: any) => [`${val} W`, "Power"]}
                       contentStyle={{ backgroundColor: "#141a27", borderColor: "#232f45", borderRadius: "12px", fontSize: "12px" }}
                     />
                     <Bar dataKey="val" fill="#10b981" radius={[4, 4, 0, 0]} />
@@ -210,7 +200,7 @@ export default function HistoryPage() {
               </div>
 
               {/* Right Side Metrics Column */}
-              <div className="xl:col-span-4 space-y-3 flex flex-col justify-center">
+              <div className="xl:col-span-3 space-y-3 flex flex-col justify-center">
                 {/* Total Generation */}
                 <div className="p-4 rounded-xl bg-[#161d2b] border border-[#232d42] flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -218,13 +208,10 @@ export default function HistoryPage() {
                       <Zap className="w-5 h-5" />
                     </div>
                     <div>
-                      <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Total Generation</p>
-                      <p className="text-xl font-black text-white mt-0.5">12.84 kWh</p>
+                      <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Samples</p>
+                        <p className="text-xl font-black text-white mt-0.5">{energyData.length}</p>
                     </div>
                   </div>
-                  <span className="text-xs font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-lg">
-                    ↑ 12%
-                  </span>
                 </div>
 
                 {/* Average per Day */}
@@ -234,13 +221,10 @@ export default function HistoryPage() {
                       <BarChart3 className="w-5 h-5" />
                     </div>
                     <div>
-                      <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Average per Day</p>
-                      <p className="text-xl font-black text-white mt-0.5">428 Wh</p>
+                      <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Average Power</p>
+                      <p className="text-xl font-black text-white mt-0.5">{averageGeneration.toFixed(1)} W</p>
                     </div>
                   </div>
-                  <span className="text-xs font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-lg">
-                    ↑ 8%
-                  </span>
                 </div>
 
                 {/* Best Day */}
@@ -250,8 +234,8 @@ export default function HistoryPage() {
                   </div>
                   <div>
                     <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Best Day</p>
-                    <p className="text-xl font-black text-white mt-0.5">612 Wh</p>
-                    <p className="text-[11px] text-slate-400">Aug 21, 2026</p>
+                    <p className="text-xl font-black text-white mt-0.5">{bestPoint ? `${bestPoint.value.toFixed(1)} W` : "—"}</p>
+                    <p className="text-[11px] text-slate-400">{bestPoint ? new Date(bestPoint.timestamp).toLocaleDateString() : "No history"}</p>
                   </div>
                 </div>
               </div>
@@ -268,7 +252,9 @@ export default function HistoryPage() {
                 </p>
               </div>
 
-              <button className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold flex items-center gap-2 transition-all shadow-lg shadow-sky-600/20 self-start sm:self-auto">
+              {(historyError || serviceError) && <p className="text-xs text-amber-400">{serviceError || historyError}</p>}
+
+              <button disabled className="px-4 py-2 rounded-xl bg-sky-600/40 text-white/50 text-xs font-semibold flex items-center gap-2 self-start sm:self-auto cursor-not-allowed" title="Service records are not available from the backend">
                 <Plus className="w-4 h-4" /> Add Service
               </button>
             </div>
@@ -304,7 +290,7 @@ export default function HistoryPage() {
                       </span>
                     </th>
                     <th className="px-6 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                      Notes
+                        Notes
                     </th>
                     <th className="px-6 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-wider text-right">
                       Actions
@@ -312,28 +298,28 @@ export default function HistoryPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#1e293b]/60 text-xs">
-                  {SERVICE_RECORDS.map((rec) => (
-                    <tr key={rec.id} className="hover:bg-white/[0.02] transition-colors">
+                  {serviceRecords.map((record) => (
+                    <tr key={record.id} className="hover:bg-white/[0.02] transition-colors">
                       <td className="px-6 py-4 text-slate-300 font-mono font-medium">
-                        {rec.date}
+                        {record.scheduled_date ? new Date(record.scheduled_date).toLocaleDateString() : "No date"}
                       </td>
                       <td className="px-6 py-4 font-bold text-white">
-                        {rec.service}
+                        {record.task_name}
                       </td>
                       <td className="px-6 py-4 text-slate-300 font-mono">
-                        {rec.scope}
+                        {getPanelName(record.panel_id)}
                       </td>
                       <td className="px-6 py-4 text-slate-300">
-                        {rec.performedBy}
+                        {record.assigned_to || "Unassigned"}
                       </td>
                       <td className="px-6 py-4">
                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                          {rec.status}
+                          {record.status}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-slate-400">
-                        {rec.notes}
+                        {record.description || record.task_type}
                       </td>
                       <td className="px-6 py-4 text-right">
                         <button className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors">
@@ -347,7 +333,7 @@ export default function HistoryPage() {
             </div>
 
             <div className="px-6 pt-4 text-xs text-slate-400 font-medium">
-              Showing 1–5 of 5 records
+              Showing {serviceRecords.length === 0 ? 0 : 1}–{serviceRecords.length} of {serviceRecords.length} records.
             </div>
           </div>
         </div>

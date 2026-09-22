@@ -6,7 +6,7 @@ import { AppProvider } from "@/lib/app-context";
 import { ToastProvider } from "@/lib/toast-context";
 import ToastContainer from "@/components/ui/Toast";
 
-const inter = Inter({ subsets: ["latin"] });
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
   title: "SolarShield — Predictive Maintenance",
@@ -19,7 +19,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className={`dark ${inter.variable}`}>
       <body className={`${inter.className} bg-[#0b0f17] text-white antialiased`}>
         <AppProvider>
           <ToastProvider>

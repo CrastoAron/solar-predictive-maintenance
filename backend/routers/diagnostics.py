@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from config import DEFAULT_DEVICE_ID
-from dependencies import get_current_user
+from dependencies import customer_device_id, get_current_user
 from diagnostics import run_diagnostics
 from models.schemas import DiagnosticsResponse
 from services.expected_power_runner import get_expected_power_runner
@@ -14,11 +14,12 @@ router = APIRouter()
 
 @router.get("/api/diagnostics", response_model=DiagnosticsResponse | None)
 async def get_diagnostics(
-    device_id: str = Query(default=DEFAULT_DEVICE_ID),
+    device_id: str | None = Query(default=None),
     user: dict = Depends(get_current_user),
 ):
+    resolved_device_id = customer_device_id(user, device_id)
     influx_client = get_influx_client()
-    telemetry = influx_client.get_latest_sensor(device_id)
+    telemetry = influx_client.get_latest_sensor(resolved_device_id)
     if telemetry is None:
         return None
 
@@ -30,9 +31,9 @@ async def get_diagnostics(
     except (KeyError, TypeError, ValueError) as error:
         raise HTTPException(status_code=422, detail=f"Invalid telemetry for diagnostics: {error}") from error
 
-    history = influx_client.get_raw_data_last_minutes(device_id=device_id, minutes=30)
+    history = influx_client.get_raw_data_last_minutes(device_id=resolved_device_id, minutes=30)
     historical_telemetry = history.to_dict(orient="records") if not history.empty else []
-    hardware_status = influx_client.get_latest_hardware_status(device_id) or {}
+    hardware_status = influx_client.get_latest_hardware_status(resolved_device_id) or {}
 
     result = run_diagnostics(
         latest_telemetry=telemetry,

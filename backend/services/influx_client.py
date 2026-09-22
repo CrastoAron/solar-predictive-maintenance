@@ -345,7 +345,6 @@ from(bucket: "{INFLUX_BUCKET_RAW}")
   |> range(start: {start_iso}, stop: {end_iso})
   |> filter(fn: (r) => r._measurement == "sensor_data" and r.device_id == "{device_id}" and r._field == "{field}")
   |> filter(fn: (r) => exists r._value)
-  |> filter(fn: (r) => r._value != null)
   |> keep(columns: ["_time","_value"])
   |> sort(columns: ["_time"], desc: false)
 """

@@ -14,6 +14,7 @@ class AdminStore:
         self._customers: list[dict[str, Any]] = []
         self._arrays: list[dict[str, Any]] = []
         self._panels: list[dict[str, Any]] = []
+        self._maintenance_tasks: list[dict[str, Any]] = []
         self._seed_default_data()
 
     def _seed_default_data(self) -> None:
@@ -274,7 +275,7 @@ class AdminStore:
         self._panels.extend(panels)
         return deepcopy(panels)
 
-    def update_panel(self, panel_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+    def update_panel(self, panel_id: str, customer_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
         client = supabase_client.get_client()
 
         v = payload.get("rated_voltage")
@@ -287,6 +288,13 @@ class AdminStore:
 
         if client:
             try:
+                panel_res = client.table("panels").select("array_id").eq("id", panel_id).limit(1).execute()
+                array_id = panel_res.data[0]["array_id"] if panel_res and panel_res.data else None
+                if not array_id:
+                    return None
+                array_res = client.table("panel_arrays").select("id").eq("id", array_id).eq("customer_id", customer_id).limit(1).execute()
+                if not array_res or not array_res.data:
+                    return None
                 res = client.table("panels").update(payload).eq("id", panel_id).execute()
                 if res and res.data:
                     return res.data[0]
@@ -295,25 +303,34 @@ class AdminStore:
 
             return None
 
+        customer_array_ids = {a["id"] for a in self._arrays if a.get("customer_id") == customer_id}
         for index, panel in enumerate(self._panels):
-            if panel["id"] == panel_id:
+            if panel["id"] == panel_id and panel.get("array_id") in customer_array_ids:
                 updated = deepcopy(panel)
                 updated.update(payload)
                 self._panels[index] = updated
                 return deepcopy(updated)
         return None
 
-    def delete_panel(self, panel_id: str) -> bool:
+    def delete_panel(self, panel_id: str, customer_id: str) -> bool:
         client = supabase_client.get_client()
         if client:
             try:
+                panel_res = client.table("panels").select("array_id").eq("id", panel_id).limit(1).execute()
+                array_id = panel_res.data[0]["array_id"] if panel_res and panel_res.data else None
+                if not array_id:
+                    return False
+                array_res = client.table("panel_arrays").select("id").eq("id", array_id).eq("customer_id", customer_id).limit(1).execute()
+                if not array_res or not array_res.data:
+                    return False
                 res = client.table("panels").delete().eq("id", panel_id).execute()
                 return bool(res and res.data)
             except Exception as err:
                 raise RuntimeError(f"Unable to delete panel in Supabase: {err}") from err
 
+        customer_array_ids = {a["id"] for a in self._arrays if a.get("customer_id") == customer_id}
         before = len(self._panels)
-        self._panels = [p for p in self._panels if p["id"] != panel_id]
+        self._panels = [p for p in self._panels if not (p["id"] == panel_id and p.get("array_id") in customer_array_ids)]
         return len(self._panels) != before
 
     def get_panel_by_device_id(self, device_id: str) -> dict[str, Any] | None:
@@ -334,6 +351,200 @@ class AdminStore:
 
         panel = next((item for item in self._panels if item.get("esp32_id") == device_id), None)
         return deepcopy(panel) if panel else None
+
+    def list_customer_panels(self, firebase_uid: str) -> list[dict[str, Any]]:
+        """Return panel configuration records belonging to a Firebase customer."""
+        client = supabase_client.get_client()
+        if client:
+            try:
+                customer = client.table("customers").select("id").eq("firebase_uid", firebase_uid).limit(1).execute()
+                if not customer or not customer.data:
+                    return []
+                arrays = client.table("panel_arrays").select("id,name,rows,cols").eq("customer_id", customer.data[0]["id"]).execute()
+                customer_arrays = arrays.data or []
+                array_ids = [item["id"] for item in customer_arrays]
+                if not array_ids:
+                    return []
+                panels = client.table("panels").select("*").in_("array_id", array_ids).execute()
+                arrays_by_id = {array["id"]: array for array in customer_arrays}
+                return [
+                    {
+                        **panel,
+                        "setup": {
+                            "id": panel["array_id"],
+                            "name": arrays_by_id[panel["array_id"]].get("name"),
+                            "rows": arrays_by_id[panel["array_id"]].get("rows"),
+                            "cols": arrays_by_id[panel["array_id"]].get("cols"),
+                        },
+                    }
+                    for panel in (panels.data or [])
+                    if panel.get("array_id") in arrays_by_id
+                ]
+            except Exception as err:
+                raise RuntimeError(f"Unable to load customer panels from Supabase: {err}") from err
+
+        customer = next((item for item in self._customers if item.get("firebase_uid") == firebase_uid), None)
+        if not customer:
+            return []
+        customer_arrays = {
+            item["id"]: item for item in self._arrays if item.get("customer_id") == customer["id"]
+        }
+        return [
+            {
+                **deepcopy(panel),
+                "setup": {
+                    "id": panel["array_id"],
+                    "name": customer_arrays[panel["array_id"]].get("name"),
+                    "rows": customer_arrays[panel["array_id"]].get("rows"),
+                    "cols": customer_arrays[panel["array_id"]].get("cols"),
+                },
+            }
+            for panel in self._panels
+            if panel.get("array_id") in customer_arrays
+        ]
+
+    def list_customer_device_ids(self, firebase_uid: str) -> list[str]:
+        """Return telemetry device IDs assigned to a Firebase customer."""
+        return [
+            panel["esp32_id"]
+            for panel in self.list_customer_panels(firebase_uid)
+            if panel.get("esp32_id")
+        ]
+
+    def list_customer_maintenance_tasks(self, firebase_uid: str) -> list[dict[str, Any]]:
+        """Return maintenance tasks belonging to a Firebase customer."""
+        client = supabase_client.get_client()
+        if client:
+            try:
+                customer = client.table("customers").select("id").eq("firebase_uid", firebase_uid).limit(1).execute()
+                if not customer or not customer.data:
+                    return []
+                return self.list_maintenance_tasks(customer.data[0]["id"])
+            except Exception as err:
+                raise RuntimeError(f"Unable to load customer maintenance tasks from Supabase: {err}") from err
+
+        customer = next((item for item in self._customers if item.get("firebase_uid") == firebase_uid), None)
+        if not customer:
+            return []
+        return self.list_maintenance_tasks(customer["id"])
+
+    # ── Maintenance Tasks ──────────────────────────────────────────────
+
+    def list_maintenance_tasks(
+        self, customer_id: str, *, status: str | None = None, task_type: str | None = None, panel_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        client = supabase_client.get_client()
+        if client:
+            try:
+                q = client.table("maintenance_tasks").select("*").eq("customer_id", customer_id)
+                if status:
+                    q = q.eq("status", status)
+                if task_type:
+                    q = q.eq("task_type", task_type)
+                if panel_id:
+                    q = q.eq("panel_id", panel_id)
+                res = q.order("scheduled_date", desc=True).execute()
+                return res.data or []
+            except Exception as err:
+                raise RuntimeError(f"Unable to list maintenance tasks from Supabase: {err}") from err
+
+        tasks = [deepcopy(t) for t in self._maintenance_tasks if t["customer_id"] == customer_id]
+        if status:
+            tasks = [t for t in tasks if t.get("status") == status]
+        if task_type:
+            tasks = [t for t in tasks if t.get("task_type") == task_type]
+        if panel_id:
+            tasks = [t for t in tasks if t.get("panel_id") == panel_id]
+        return tasks
+
+    def create_maintenance_task(self, customer_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        client = supabase_client.get_client()
+        task_id = str(uuid.uuid4())
+        panel_id = payload.get("panel_id")
+        if panel_id and client:
+            panel_res = client.table("panels").select("array_id").eq("id", panel_id).limit(1).execute()
+            array_id = panel_res.data[0]["array_id"] if panel_res and panel_res.data else None
+            if not array_id:
+                return None
+            array_res = client.table("panel_arrays").select("id").eq("id", array_id).eq("customer_id", customer_id).limit(1).execute()
+            if not array_res or not array_res.data:
+                return None
+        elif panel_id:
+            customer_array_ids = {a["id"] for a in self._arrays if a.get("customer_id") == customer_id}
+            if not any(p.get("id") == panel_id and p.get("array_id") in customer_array_ids for p in self._panels):
+                return None
+        record = {
+            "id": task_id,
+            "customer_id": customer_id,
+            "panel_id": panel_id,
+            "task_name": payload.get("task_name", "Untitled Task"),
+            "task_type": payload.get("task_type", "Inspection"),
+            "status": payload.get("status", "Scheduled"),
+            "priority": payload.get("priority", "Medium"),
+            "scheduled_date": payload.get("scheduled_date"),
+            "assigned_to": payload.get("assigned_to"),
+            "description": payload.get("description"),
+            "estimated_duration_minutes": payload.get("estimated_duration_minutes"),
+            "checklist": payload.get("checklist", []),
+        }
+
+        if client:
+            try:
+                res = client.table("maintenance_tasks").insert(record).execute()
+                if res and res.data:
+                    return res.data[0]
+            except Exception as err:
+                raise RuntimeError(f"Unable to create maintenance task in Supabase: {err}") from err
+            raise RuntimeError("Supabase did not return the created maintenance task")
+
+        self._maintenance_tasks.append(record)
+        return deepcopy(record)
+
+    def update_maintenance_task(self, task_id: str, customer_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+        client = supabase_client.get_client()
+        panel_id = payload.get("panel_id")
+        if panel_id:
+            if client:
+                panel_res = client.table("panels").select("array_id").eq("id", panel_id).limit(1).execute()
+                array_id = panel_res.data[0]["array_id"] if panel_res and panel_res.data else None
+                if not array_id:
+                    return None
+                array_res = client.table("panel_arrays").select("id").eq("id", array_id).eq("customer_id", customer_id).limit(1).execute()
+                if not array_res or not array_res.data:
+                    return None
+            else:
+                customer_array_ids = {a["id"] for a in self._arrays if a.get("customer_id") == customer_id}
+                if not any(p.get("id") == panel_id and p.get("array_id") in customer_array_ids for p in self._panels):
+                    return None
+        if client:
+            try:
+                res = client.table("maintenance_tasks").update(payload).eq("id", task_id).eq("customer_id", customer_id).execute()
+                if res and res.data:
+                    return res.data[0]
+            except Exception as err:
+                raise RuntimeError(f"Unable to update maintenance task in Supabase: {err}") from err
+            return None
+
+        for index, task in enumerate(self._maintenance_tasks):
+            if task["id"] == task_id and task.get("customer_id") == customer_id:
+                updated = deepcopy(task)
+                updated.update(payload)
+                self._maintenance_tasks[index] = updated
+                return deepcopy(updated)
+        return None
+
+    def delete_maintenance_task(self, task_id: str, customer_id: str) -> bool:
+        client = supabase_client.get_client()
+        if client:
+            try:
+                res = client.table("maintenance_tasks").delete().eq("id", task_id).eq("customer_id", customer_id).execute()
+                return bool(res and res.data)
+            except Exception as err:
+                raise RuntimeError(f"Unable to delete maintenance task in Supabase: {err}") from err
+
+        before = len(self._maintenance_tasks)
+        self._maintenance_tasks = [t for t in self._maintenance_tasks if not (t["id"] == task_id and t.get("customer_id") == customer_id)]
+        return len(self._maintenance_tasks) != before
 
 
 admin_store = AdminStore()

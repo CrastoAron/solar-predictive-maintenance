@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Query, HTTPException
 
 from config import DEFAULT_DEVICE_ID
-from dependencies import get_current_user
+from dependencies import customer_device_id, get_current_user
 from models.schemas import HistoryPoint, HistoryResponse
 from services.influx_client import get_influx_client
 
@@ -29,7 +29,7 @@ async def get_history(
     field: str = Query(...),
     start: str | None = Query(default=None),
     end: str | None = Query(default=None),
-    device_id: str = Query(default=DEFAULT_DEVICE_ID),
+    device_id: str | None = Query(default=None),
     user: dict = Depends(get_current_user),
 ):
     if field not in ALLOWED_FIELDS:
@@ -46,8 +46,9 @@ async def get_history(
         start_dt = _parse_query_dt(start)
         end_dt = _parse_query_dt(end)
 
+    resolved_device_id = customer_device_id(user, device_id)
     rows = influx.get_history_sensor_field(
-        device_id=device_id,
+        device_id=resolved_device_id,
         field=field,
         start=start_dt,
         end=end_dt,

@@ -8,7 +8,6 @@ import {
   LayoutGrid,
   TrendingUp,
   Bell,
-  Wrench,
   Activity,
   History,
   LogOut,
@@ -21,29 +20,22 @@ import { useAuth } from "@/lib/auth-context";
 import { useAppContext } from "@/lib/app-context";
 
 const NAV_ITEMS = [
-  { href: "/dashboard",   label: "Dashboard",   icon: LayoutDashboard },
-  { href: "/panels",      label: "Panels",       icon: LayoutGrid },
-  { href: "/trends",      label: "Trends",       icon: TrendingUp },
-  { href: "/alerts",      label: "Alerts",       icon: Bell, badge: true },
-  { href: "/maintenance", label: "Maintenance",  icon: Wrench },
-  { href: "/monitoring",  label: "Monitoring",  icon: Activity },
-  { href: "/history",     label: "History",      icon: History },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/panels", label: "Panels", icon: LayoutGrid },
+  { href: "/trends", label: "Trends", icon: TrendingUp },
+  { href: "/alerts", label: "Alerts", icon: Bell, badge: true },
+  { href: "/monitoring", label: "Monitoring", icon: Activity },
+  { href: "/history", label: "History", icon: History },
 ];
-
-const CONNECTION_CONFIG = {
-  live:       { dot: "bg-emerald-400",             label: "Live",        bar: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" },
-  offline:    { dot: "bg-red-400",                 label: "Offline",     bar: "bg-red-500/10 text-red-400 border-red-500/20" },
-  connecting: { dot: "bg-amber-400 animate-pulse", label: "Connecting…", bar: "bg-amber-500/10 text-amber-400 border-amber-500/20" },
-};
 
 export default function NavSidebar() {
   const pathname = usePathname();
   const { user, signOut } = useAuth();
-  const { connectionStatus, criticalAlertCount } = useAppContext();
+  const { criticalAlertCount } = useAppContext();
   const [open, setOpen] = useState(false);
 
-  const conn = CONNECTION_CONFIG[connectionStatus] || CONNECTION_CONFIG.live;
-  const currentLabel = NAV_ITEMS.find((item) => item.href === pathname)?.label ?? "SolarShield";
+  const currentLabel =
+    NAV_ITEMS.find((item) => item.href === pathname)?.label ?? "SolarShield";
 
   const sidebarContent = (
     <>
@@ -52,10 +44,16 @@ export default function NavSidebar() {
         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center shadow-lg shadow-orange-500/20 flex-shrink-0">
           <Sun className="w-6 h-6 text-white" />
         </div>
+
         <div className="flex-1 min-w-0">
-          <p className="text-white font-bold text-base tracking-tight leading-tight">SolarShield</p>
-          <p className="text-slate-400 text-xs mt-0.5">Predictive Maintenance</p>
+          <p className="text-white font-bold text-base tracking-tight leading-tight">
+            SolarShield
+          </p>
+          <p className="text-slate-400 text-xs mt-0.5">
+            Predictive Maintenance
+          </p>
         </div>
+
         {/* Close button — mobile only */}
         <button
           onClick={() => setOpen(false)}
@@ -66,16 +64,8 @@ export default function NavSidebar() {
         </button>
       </div>
 
-      {/* ── Live Connection Badge ───────────────────────────────────── */}
-      <div className="px-4 pt-4 pb-2">
-        <div className={`px-3 py-1.5 rounded-full inline-flex items-center gap-2 border text-xs font-semibold ${conn.bar}`}>
-          <span className={`w-2 h-2 rounded-full ${conn.dot}`} />
-          <span>{conn.label}</span>
-        </div>
-      </div>
-
       {/* ── Navigation Links ─────────────────────────────────────────── */}
-      <nav className="flex-1 px-3 py-3 space-y-1.5 overflow-y-auto">
+      <nav className="flex-1 px-3 py-4 space-y-1.5 overflow-y-auto">
         {NAV_ITEMS.map(({ href, label, icon: Icon, badge }) => {
           const active = pathname === href;
 
@@ -84,25 +74,33 @@ export default function NavSidebar() {
               key={href}
               href={href}
               onClick={() => setOpen(false)}
-              className={`flex items-center gap-3.5 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 group ${
-                active
+              className={`flex items-center gap-3.5 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 group ${active
                   ? "bg-orange-500/15 text-orange-400 border border-orange-500/20 shadow-sm"
                   : "text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]"
-              }`}
+                }`}
             >
               <Icon
-                className={`w-5 h-5 flex-shrink-0 transition-colors ${
-                  active ? "text-orange-400" : "text-slate-400 group-hover:text-slate-200"
-                }`}
+                className={`w-5 h-5 flex-shrink-0 transition-colors ${active
+                    ? "text-orange-400"
+                    : "text-slate-400 group-hover:text-slate-200"
+                  }`}
               />
+
               <span className="flex-1">{label}</span>
 
               {/* Alert Badge Counter */}
               {badge && (
-                <span className={`min-w-[20px] h-5 px-1.5 rounded-full text-xs font-bold flex items-center justify-center leading-none ${
-                  criticalAlertCount > 0 ? "bg-red-500 text-white" : "bg-orange-500/20 text-orange-400"
-                }`}>
-                  {criticalAlertCount > 0 ? (criticalAlertCount > 9 ? "9+" : criticalAlertCount) : "2"}
+                <span
+                  className={`min-w-[20px] h-5 px-1.5 rounded-full text-xs font-bold flex items-center justify-center leading-none ${criticalAlertCount > 0
+                      ? "bg-red-500 text-white"
+                      : "bg-orange-500/20 text-orange-400"
+                    }`}
+                >
+                  {criticalAlertCount > 0
+                    ? criticalAlertCount > 9
+                      ? "9+"
+                      : criticalAlertCount
+                    : "2"}
                 </span>
               )}
 
@@ -130,6 +128,7 @@ export default function NavSidebar() {
               {user?.displayName?.[0] ?? "A"}
             </div>
           )}
+
           <div className="flex-1 min-w-0">
             <p className="text-white text-xs font-bold truncate">
               {user?.displayName ?? "Aron Preston Crasto"}
@@ -139,6 +138,7 @@ export default function NavSidebar() {
             </p>
           </div>
         </div>
+
         <button
           onClick={signOut}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all duration-200"
@@ -162,12 +162,9 @@ export default function NavSidebar() {
           <Menu className="w-5 h-5" />
         </button>
 
-        <span className="text-white font-bold text-sm tracking-wide">{currentLabel}</span>
-
-        <div className="ml-auto flex items-center gap-2 pr-1">
-          <span className={`w-2 h-2 rounded-full ${conn.dot}`} />
-          <span className="text-xs text-slate-400 font-medium">{conn.label}</span>
-        </div>
+        <span className="text-white font-bold text-sm tracking-wide">
+          {currentLabel}
+        </span>
       </header>
 
       {/* ── Mobile Overlay Backdrop ─────────────────────────────────── */}

@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 
 
 TELEMETRY_PATH = "/api/telemetry"
+HARDWARE_NAMES = ("bme280", "ina219", "bh1750", "ds3231")
 
 
 def endpoint_url(value: str) -> str:
@@ -32,16 +33,14 @@ def make_payload(device_id: str, hardware_status: list[int] | None = None) -> di
     payload: dict[str, Any] = {
         "device_id": device_id,
         "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "voltage": round(random.uniform(17.5, 20.5), 3),
-        "current": round(random.uniform(0.8, 2.2), 3),
+        "voltage": round(random.uniform(15.5, 17.0), 3),
+        "current": round(random.uniform(0.5, 0.75), 3),
         "lux": round(random.uniform(20_000, 85_000), 1),
         "temperature": round(random.uniform(22.0, 42.0), 2),
         "humidity": round(random.uniform(35.0, 75.0), 2),
     }
-    if hardware_status is not None:
-        payload["hardware_status"] = dict(
-            zip(("bme280", "ina219", "bh1750", "ds3231"), hardware_status)
-        )
+    status_values = hardware_status if hardware_status is not None else [0] * len(HARDWARE_NAMES)
+    payload["hardware_status"] = dict(zip(HARDWARE_NAMES, status_values))
     return payload
 
 
@@ -76,7 +75,7 @@ def parse_args() -> argparse.Namespace:
         metavar=("BME280", "INA219", "BH1750", "DS3231"),
         type=int,
         default=None,
-        help="Optional diagnostic status values, each in the range 0..5",
+        help="Diagnostic status values, each in the range 0..5 (default: all healthy)",
     )
     args = parser.parse_args()
     if args.interval < 0 or args.count < 0 or args.timeout <= 0:
@@ -100,6 +99,8 @@ def main() -> None:
                 print(f"[{sent:05d}] HTTP {exc.code}: {exc.read().decode('utf-8', 'replace')}", file=sys.stderr)
             except URLError as exc:
                 print(f"[{sent:05d}] request failed: {exc.reason}", file=sys.stderr)
+            except TimeoutError:
+                print(f"[{sent:05d}] request timed out after {args.timeout:g}s", file=sys.stderr)
             if not args.count or sent < args.count:
                 time.sleep(args.interval)
     except KeyboardInterrupt:

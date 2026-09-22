@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { getPanels, PanelData } from "@/lib/api";
 import NavSidebar from "@/components/ui/NavSidebar";
 import Header from "@/components/ui/Header";
 import {
@@ -19,25 +20,14 @@ import {
 
 interface PanelItem {
   id: string;
-  status: "Healthy" | "Warning" | "Critical";
-  currentPower: number;
-  todayGen: number;
-  performance: number;
+  name: string;
+  setup: PanelData["setup"];
+  status: "Healthy" | "Warning" | "Critical" | "Unavailable";
+  currentPower: number | null;
+  todayGen: number | null;
+  performance: number | null;
   lastUpdated: string;
 }
-
-const MOCK_PANELS: PanelItem[] = [
-  { id: "P-01", status: "Healthy", currentPower: 8.2, todayGen: 284, performance: 96, lastUpdated: "2 min ago" },
-  { id: "P-02", status: "Healthy", currentPower: 7.9, todayGen: 271, performance: 92, lastUpdated: "2 min ago" },
-  { id: "P-03", status: "Warning", currentPower: 4.1, todayGen: 143, performance: 52, lastUpdated: "3 min ago" },
-  { id: "P-04", status: "Healthy", currentPower: 8.4, todayGen: 291, performance: 98, lastUpdated: "2 min ago" },
-  { id: "P-05", status: "Critical", currentPower: 2.8, todayGen: 91, performance: 31, lastUpdated: "3 min ago" },
-  { id: "P-06", status: "Healthy", currentPower: 8.1, todayGen: 280, performance: 95, lastUpdated: "4 min ago" },
-  { id: "P-07", status: "Healthy", currentPower: 8.3, todayGen: 288, performance: 97, lastUpdated: "1 min ago" },
-  { id: "P-08", status: "Healthy", currentPower: 8.0, todayGen: 275, performance: 93, lastUpdated: "5 min ago" },
-  { id: "P-09", status: "Healthy", currentPower: 7.8, todayGen: 268, performance: 91, lastUpdated: "2 min ago" },
-  { id: "P-10", status: "Healthy", currentPower: 8.2, todayGen: 282, performance: 96, lastUpdated: "3 min ago" },
-];
 
 export default function PanelsPage() {
   const { user } = useAuth();
@@ -46,12 +36,29 @@ export default function PanelsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [rangeFilter, setRangeFilter] = useState("P-01 - P-05");
   const [page, setPage] = useState(1);
+  const [panels, setPanels] = useState<PanelItem[]>([]);
 
   useEffect(() => {
     if (!user) router.replace("/login");
   }, [user, router]);
 
-  const filteredPanels = MOCK_PANELS.filter((p) =>
+  useEffect(() => {
+    if (!user) return;
+    getPanels()
+      .then((records: PanelData[]) => setPanels(records.map((panel) => ({
+        id: panel.id,
+        name: panel.name,
+        setup: panel.setup,
+        status: "Unavailable",
+        currentPower: null,
+        todayGen: null,
+        performance: null,
+        lastUpdated: "Unavailable",
+      }))))
+      .catch(() => setPanels([]));
+  }, [user]);
+
+  const filteredPanels = panels.filter((p) =>
     p.id.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -84,6 +91,8 @@ export default function PanelsPage() {
             Critical
           </span>
         );
+      case "Unavailable":
+        return <span className="text-xs font-semibold text-slate-500">Unavailable</span>;
       default:
         return null;
     }
@@ -137,7 +146,7 @@ export default function PanelsPage() {
             </div>
             <div>
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Panels</p>
-              <p className="text-3xl font-extrabold text-white mt-1">20</p>
+              <p className="text-3xl font-extrabold text-white mt-1">{panels.length}</p>
             </div>
           </div>
 
@@ -147,7 +156,7 @@ export default function PanelsPage() {
             </div>
             <div>
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Healthy</p>
-              <p className="text-3xl font-extrabold text-emerald-400 mt-1">18</p>
+              <p className="text-3xl font-extrabold text-emerald-400 mt-1">{panels.filter((panel) => panel.status === "Healthy").length}</p>
             </div>
           </div>
 
@@ -157,7 +166,7 @@ export default function PanelsPage() {
             </div>
             <div>
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Warning</p>
-              <p className="text-3xl font-extrabold text-amber-400 mt-1">1</p>
+              <p className="text-3xl font-extrabold text-amber-400 mt-1">{panels.filter((panel) => panel.status === "Warning").length}</p>
             </div>
           </div>
 
@@ -167,7 +176,7 @@ export default function PanelsPage() {
             </div>
             <div>
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Critical</p>
-              <p className="text-3xl font-extrabold text-red-400 mt-1">1</p>
+              <p className="text-3xl font-extrabold text-red-400 mt-1">{panels.filter((panel) => panel.status === "Critical").length}</p>
             </div>
           </div>
         </div>
@@ -182,6 +191,9 @@ export default function PanelsPage() {
                     <span className="flex items-center gap-1 cursor-pointer hover:text-white">
                       ID <ArrowUpDown className="w-3 h-3" />
                     </span>
+                  </th>
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                    Setup
                   </th>
                   <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">
                     <span className="flex items-center gap-1 cursor-pointer hover:text-white">
@@ -222,22 +234,26 @@ export default function PanelsPage() {
                       </div>
                       {panel.id}
                     </td>
+                    <td className="px-6 py-4 text-sm text-slate-300">
+                      <div className="font-medium text-white">{panel.setup.name}</div>
+                      <div className="text-xs text-slate-500">{panel.setup.rows} × {panel.setup.cols} array</div>
+                    </td>
                     <td className="px-6 py-4 text-sm">{getStatusBadge(panel.status)}</td>
                     <td className="px-6 py-4 text-sm font-mono font-medium text-white">
-                      {panel.currentPower} W
+                      {panel.currentPower == null ? "—" : `${panel.currentPower} W`}
                     </td>
                     <td className="px-6 py-4 text-sm font-mono text-slate-300">
-                      {panel.todayGen} Wh
+                      {panel.todayGen == null ? "—" : `${panel.todayGen} Wh`}
                     </td>
                     <td className="px-6 py-4 text-sm">
                       <div className="flex items-center gap-3 w-44">
                         <span className="font-mono text-xs font-bold text-white w-9">
-                          {panel.performance}%
+                          {panel.performance == null ? "—" : `${panel.performance}%`}
                         </span>
                         <div className="flex-1 h-2 rounded-full bg-slate-800 overflow-hidden">
                           <div
-                            className={`h-full rounded-full ${getProgressColor(panel.performance)}`}
-                            style={{ width: `${panel.performance}%` }}
+                            className={`h-full rounded-full ${getProgressColor(panel.performance ?? 0)}`}
+                            style={{ width: `${panel.performance ?? 0}%` }}
                           />
                         </div>
                       </div>
@@ -259,7 +275,7 @@ export default function PanelsPage() {
           {/* Pagination Footer */}
           <div className="flex flex-col sm:flex-row items-center justify-between px-6 py-4 border-t border-[#1e293b] bg-[#0f141f] gap-4">
             <span className="text-xs text-slate-400 font-medium">
-              Showing 1–5 of 20 panels
+              Showing {filteredPanels.length === 0 ? 0 : (page - 1) * 5 + 1}–{Math.min(page * 5, filteredPanels.length)} of {filteredPanels.length} panels
             </span>
             <div className="flex items-center gap-2">
               <button

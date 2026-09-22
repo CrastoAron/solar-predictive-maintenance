@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useAppContext } from "@/lib/app-context";
 import { useToast } from "@/lib/toast-context";
-import { getLive, getHardwareStatus, LiveData, HardwareStatusData } from "@/lib/api";
+import { getLive, getHardwareStatus, getExpectedPower, getPanels, LiveData, HardwareStatusData, ExpectedPowerData, PanelData } from "@/lib/api";
 import NavSidebar from "@/components/ui/NavSidebar";
 import Header from "@/components/ui/Header";
 import MetricCard from "@/components/ui/MetricCard";
@@ -15,13 +15,9 @@ import {
   Activity,
   Gauge,
   Sun,
+  Target,
   Wifi,
   Grid,
-  Edit,
-  Calendar,
-  ChevronDown,
-  TrendingUp,
-  RefreshCw,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -34,43 +30,31 @@ import {
 } from "recharts";
 
 const SENSOR_LIST = [
-  { name: "Voltage (INA219)", key: "voltage", time: "17:39:02" },
-  { name: "Current (INA219)", key: "current", time: "17:39:02" },
+  { name: "Voltage (INA219)", key: "ina219", time: "17:39:02" },
+  { name: "Current (INA219)", key: "ina219", time: "17:39:02" },
   { name: "Irradiance (BH1750)", key: "bh1750", time: "17:39:00" },
   { name: "Temperature (BME280)", key: "bme280", time: "17:39:00" },
-  { name: "Humidity (BME280)", key: "bme280_h", time: "17:39:00" },
+  { name: "Humidity (BME280)", key: "bme280", time: "17:39:00" },
   { name: "RTC (DS3231)", key: "ds3231", time: "17:39:01" },
-  { name: "SD Card", key: "sd", time: "17:38:55" },
 ];
 
-const PANEL_SPECS = [
-  { label: "Panel ID", value: "Panel 01" },
-  { label: "Model", value: "Kotak KM-P012" },
-  { label: "Maximum Power (Pmax)", value: "12 W (±3%)" },
-  { label: "Open Circuit Voltage (Voc)", value: "21 V" },
-  { label: "Short Circuit Current (Isc)", value: "0.75 A" },
-  { label: "Voltage at Max Power (Vmp)", value: "17 V" },
-  { label: "Current at Max Power (Imp)", value: "0.70 A" },
-  { label: "Location", value: "Solar Array A" },
-  { label: "Installation Date", value: "Jan 15, 2026" },
-];
+const SENSOR_STATUS_LABELS: Record<number, string> = {
+  0: "Online",
+  1: "Initialization failed",
+  2: "Device not found",
+  3: "Invalid data",
+  4: "Read error",
+  5: "Device-specific error",
+};
 
-const MOCK_GRAPH = [
-  { date: "Apr 25", value: 3 },
-  { date: "Apr 26", value: 7 },
-  { date: "Apr 27", value: 2 },
-  { date: "Apr 28", value: 6 },
-  { date: "Apr 29", value: 2.5 },
-  { date: "May 01", value: 7.5 },
-  { date: "May 03", value: 6 },
-  { date: "May 04", value: 7.8 },
-  { date: "May 07", value: 7.2 },
-  { date: "May 10", value: 7.9 },
-  { date: "May 13", value: 6.2 },
-  { date: "May 16", value: 6.8 },
-  { date: "May 19", value: 7.1 },
-  { date: "May 22", value: 7.4 },
-];
+const LIVE_POINT_LIMIT = 60;
+
+const MONITORING_CHART_STYLES: Record<string, { stroke: string; gradientId: string }> = {
+  "Power (W)": { stroke: "#f97316", gradientId: "monitoring-gradient-power" },
+  "Voltage (V)": { stroke: "#38bdf8", gradientId: "monitoring-gradient-voltage" },
+  "Current (A)": { stroke: "#60a5fa", gradientId: "monitoring-gradient-current" },
+  "Irradiance (lux)": { stroke: "#facc15", gradientId: "monitoring-gradient-irradiance" },
+};
 
 export default function MonitoringPage() {
   const { user } = useAuth();
@@ -78,31 +62,74 @@ export default function MonitoringPage() {
   const { setConnectionStatus } = useAppContext();
   const { addToast } = useToast();
 
-  const [selectedPanel, setSelectedPanel] = useState("Panel 01");
+  const [selectedPanel, setSelectedPanel] = useState("");
   const [selectedParam, setSelectedParam] = useState("Power (W)");
-  const [timeRange, setTimeRange] = useState("1W");
   const [live, setLive] = useState<LiveData | null>(null);
+  const [expectedPower, setExpectedPower] = useState<ExpectedPowerData | null>(null);
   const [hardware, setHardware] = useState<HardwareStatusData | null>(null);
+  const [liveHistory, setLiveHistory] = useState<{ timestamp: string; value: number }[]>([]);
+  const [panels, setPanels] = useState<PanelData[]>([]);
+  const [panelsLoading, setPanelsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     if (!user) router.replace("/login");
   }, [user, router]);
 
+  useEffect(() => {
+    if (!user) return;
+    setPanelsLoading(true);
+    getPanels()
+      .then((records) => {
+        setPanels(records);
+          if (records.length > 0) setSelectedPanel(records[0].name);
+        setError(records.length === 0 ? "No solar panels are assigned to this account." : null);
+      })
+      .catch((requestError) => {
+        setPanels([]);
+        setError(requestError instanceof Error ? requestError.message : "Unable to load assigned panels.");
+      })
+      .finally(() => setPanelsLoading(false));
+  }, [user]);
+
   const fetchMonitoringData = useCallback(async () => {
+    if (panelsLoading || panels.length === 0 || !selectedPanel) return;
     try {
-      const [liveData, hwData] = await Promise.all([getLive(), getHardwareStatus()]);
+      const requestId = ++requestIdRef.current;
+      const panel = panels.find((candidate) => candidate.name === selectedPanel);
+      if (!panel?.esp32_id) {
+        setConnectionStatus("offline");
+        setError("The selected panel has no telemetry device assigned.");
+        return;
+      }
+      const deviceId = panel.esp32_id;
+      const [liveData, hwData, expectedPowerData] = await Promise.all([
+        getLive(deviceId),
+        getHardwareStatus(deviceId),
+        getExpectedPower(deviceId),
+      ]);
+      if (requestId !== requestIdRef.current) return;
       if (liveData) setLive(liveData);
       if (hwData) setHardware(hwData);
+      setExpectedPower(expectedPowerData);
+      if (liveData) {
+        const value = selectedParam === "Voltage (V)" ? liveData.voltage : selectedParam === "Current (A)" ? liveData.current : selectedParam === "Irradiance (lux)" ? liveData.lux : liveData.power;
+        setLiveHistory((points) => [...points, { timestamp: liveData.timestamp, value }].slice(-LIVE_POINT_LIMIT));
+      }
       setConnectionStatus("live");
       setError(null);
     } catch (e) {
-      console.error(e);
+      console.error("Monitoring request failed:", e);
       setConnectionStatus("offline");
-      setError("Failed to fetch monitoring data.");
+      setError(e instanceof Error ? e.message : "Failed to fetch monitoring data.");
     }
-  }, [setConnectionStatus]);
+  }, [panels, panelsLoading, selectedPanel, selectedParam, setConnectionStatus]);
+
+  useEffect(() => {
+    setLiveHistory([]);
+  }, [selectedParam, selectedPanel]);
 
   useEffect(() => {
     if (!user) return;
@@ -118,10 +145,21 @@ export default function MonitoringPage() {
     addToast("success", "Monitoring data refreshed.");
   };
 
-  const vVal = live?.voltage ?? 17.94;
-  const cVal = live?.current ?? 1.95;
-  const pVal = live?.power ?? 34.9;
-  const irrVal = live?.lux ?? 798.4;
+  const vVal = live?.voltage;
+  const cVal = live?.current;
+  const pVal = live?.power;
+  const expectedPowerVal = expectedPower?.expected_power;
+  const irrVal = live?.lux;
+  const chartStyle = MONITORING_CHART_STYLES[selectedParam] ?? MONITORING_CHART_STYLES["Power (W)"];
+  const selectedPanelData = panels.find((panel) => panel.name === selectedPanel);
+  const panelSpecs = [
+    ["Panel ID", selectedPanelData?.id],
+    ["Model", selectedPanelData?.name],
+    ["Maximum Power (Pmax)", selectedPanelData?.rated_power],
+    ["Rated Voltage (V)", selectedPanelData?.rated_voltage],
+    ["Rated Current (A)", selectedPanelData?.rated_current],
+    ["Location", selectedPanelData?.setup.name],
+  ].map(([label, value]) => ({ label: String(label), value: value == null ? "Unavailable" : String(value) }));
 
   return (
     <div className="flex min-h-screen bg-[#0b0f17]">
@@ -132,6 +170,7 @@ export default function MonitoringPage() {
           title="Monitoring"
           subtitle="Real-time sensor data and system performance"
           selectedPanel={selectedPanel}
+          panels={panels}
           onPanelChange={setSelectedPanel}
           statusBadge={{ text: "Live Data", type: "live" }}
           onRefresh={handleRefresh}
@@ -143,10 +182,10 @@ export default function MonitoringPage() {
         ) : (
           <div className="space-y-6">
             {/* 4 Top Cards with percentage change */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
               <MetricCard
                 label="Voltage"
-                value={vVal.toFixed(2)}
+                value={vVal == null ? "—" : vVal.toFixed(2)}
                 unit="V"
                 icon={<Zap className="w-5 h-5" />}
                 color="orange"
@@ -155,7 +194,7 @@ export default function MonitoringPage() {
               />
               <MetricCard
                 label="Current"
-                value={cVal.toFixed(2)}
+                value={cVal == null ? "—" : cVal.toFixed(2)}
                 unit="A"
                 icon={<Activity className="w-5 h-5" />}
                 color="blue"
@@ -164,7 +203,7 @@ export default function MonitoringPage() {
               />
               <MetricCard
                 label="Power"
-                value={pVal.toFixed(1)}
+                value={pVal == null ? "—" : pVal.toFixed(1)}
                 unit="W"
                 icon={<Gauge className="w-5 h-5" />}
                 color="amber"
@@ -172,8 +211,17 @@ export default function MonitoringPage() {
                 subtext="vs last hour"
               />
               <MetricCard
+                label="Expected Power"
+                value={expectedPowerVal == null ? "—" : expectedPowerVal.toFixed(1)}
+                unit="W"
+                icon={<Target className="w-5 h-5" />}
+                color="green"
+                trend={expectedPower?.operational_status ?? "Not evaluated"}
+                subtext="ML baseline"
+              />
+              <MetricCard
                 label="Irradiance"
-                value={irrVal.toFixed(1)}
+                value={irrVal == null ? "—" : irrVal.toFixed(1)}
                 unit="lux"
                 icon={<Sun className="w-5 h-5" />}
                 color="purple"
@@ -187,7 +235,7 @@ export default function MonitoringPage() {
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
                 <div>
                   <h2 className="text-base font-bold text-white tracking-tight">Parameter Over Time</h2>
-                  <p className="text-xs text-slate-400 mt-0.5">Real-time data for selected parameter</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Live stream for selected parameter</p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
@@ -205,40 +253,21 @@ export default function MonitoringPage() {
                     </select>
                   </div>
 
-                  {/* Time Range Pills */}
-                  <div className="flex items-center gap-1 bg-[#161c2b] p-1 rounded-xl border border-[#232d42]">
-                    {["1H", "6H", "1D", "1W", "1M"].map((range) => (
-                      <button
-                        key={range}
-                        onClick={() => setTimeRange(range)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                          timeRange === range
-                            ? "bg-sky-600 text-white shadow-md shadow-sky-600/30"
-                            : "text-slate-400 hover:text-white"
-                        }`}
-                      >
-                        {range}
-                      </button>
-                    ))}
-                    <button className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-400 hover:text-white flex items-center gap-1">
-                      <Calendar className="w-3.5 h-3.5" /> Custom
-                    </button>
-                  </div>
                 </div>
               </div>
 
               {/* Area Chart */}
               <div className="w-full pt-2">
                 <ResponsiveContainer width="100%" height={260}>
-                  <AreaChart data={MOCK_GRAPH} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <AreaChart data={liveHistory.map((point) => ({ date: point.timestamp, value: point.value }))} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                     <defs>
-                      <linearGradient id="colorOrange" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#f97316" stopOpacity={0.6} />
-                        <stop offset="95%" stopColor="#f97316" stopOpacity={0.0} />
+                      <linearGradient id={chartStyle.gradientId} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={chartStyle.stroke} stopOpacity={0.6} />
+                        <stop offset="95%" stopColor={chartStyle.stroke} stopOpacity={0.0} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                    <XAxis dataKey="date" tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <XAxis dataKey="date" tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(value) => new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })} />
                     <YAxis tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} />
                     <Tooltip
                       contentStyle={{ backgroundColor: "#141a27", borderColor: "#232f45", borderRadius: "12px", fontSize: "12px" }}
@@ -246,10 +275,10 @@ export default function MonitoringPage() {
                     <Area
                       type="monotone"
                       dataKey="value"
-                      stroke="#f97316"
+                      stroke={chartStyle.stroke}
                       strokeWidth={2.5}
                       fillOpacity={1}
-                      fill="url(#colorOrange)"
+                      fill={`url(#${chartStyle.gradientId})`}
                     />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -272,21 +301,28 @@ export default function MonitoringPage() {
                   </div>
 
                   <div className="space-y-3">
-                    {SENSOR_LIST.map((sensor) => (
+                    {SENSOR_LIST.map((sensor) => {
+                      const sensorValue = hardware?.[sensor.key as keyof HardwareStatusData];
+                      const online = typeof sensorValue === "number" ? sensorValue === 0 : false;
+                      const statusLabel = typeof sensorValue === "number"
+                        ? SENSOR_STATUS_LABELS[sensorValue] ?? "Unknown status"
+                        : "Unavailable";
+                      return (
                       <div
                         key={sensor.name}
                         className="flex items-center justify-between py-2 border-b border-white/5 last:border-0"
                       >
                         <span className="text-xs font-semibold text-slate-300">{sensor.name}</span>
                         <div className="flex items-center gap-4">
-                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
-                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                            Online
+                          <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${online ? "text-emerald-400" : "text-amber-400"}`}>
+                            <span className={`w-2 h-2 rounded-full ${online ? "bg-emerald-400 animate-pulse" : "bg-slate-600"}`} />
+                            {statusLabel}
                           </span>
-                          <span className="text-xs text-slate-400 font-mono">{sensor.time}</span>
+                          <span className="text-xs text-slate-400 font-mono">{hardware?.timestamp ? new Date(hardware.timestamp).toLocaleTimeString() : "—"}</span>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -305,13 +341,13 @@ export default function MonitoringPage() {
                       </div>
                     </div>
 
-                    <button className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-colors">
+                    {/* <button className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-colors">
                       <Edit className="w-3.5 h-3.5" /> Edit
-                    </button>
+                    </button> */}
                   </div>
 
                   <div className="space-y-2.5 text-xs">
-                    {PANEL_SPECS.map((spec) => (
+                    {panelSpecs.map((spec) => (
                       <div key={spec.label} className="flex items-center justify-between py-1.5 border-b border-white/5 last:border-0">
                         <span className="text-slate-400 font-medium">{spec.label}</span>
                         <span className="text-white font-mono font-semibold">{spec.value}</span>

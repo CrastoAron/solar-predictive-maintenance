@@ -1,9 +1,11 @@
 import sys
+from argparse import Namespace
 from pathlib import Path
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
+import simulate_sensor_ngrok
 from simulate_sensor_ngrok import TELEMETRY_PATH, endpoint_url, make_payload
 
 
@@ -16,3 +18,29 @@ def test_simulated_payload_matches_telemetry_contract():
 
     assert {"device_id", "timestamp", "voltage", "current", "lux", "temperature", "humidity"} <= payload.keys()
     assert payload["hardware_status"] == {"bme280": 0, "ina219": 1, "bh1750": 2, "ds3231": 3}
+
+
+def test_simulated_payload_includes_healthy_hardware_status_by_default():
+    payload = make_payload("esp32-test")
+
+    assert payload["hardware_status"] == {"bme280": 0, "ina219": 0, "bh1750": 0, "ds3231": 0}
+
+
+def test_timeout_is_reported_without_crashing(monkeypatch, capsys):
+    monkeypatch.setattr(
+        simulate_sensor_ngrok,
+        "parse_args",
+        lambda: Namespace(
+            url="https://example.ngrok-free.app/api/telemetry",
+            device_id="esp32-test",
+            hardware_status=None,
+            timeout=3.0,
+            count=1,
+            interval=0,
+        ),
+    )
+    monkeypatch.setattr(simulate_sensor_ngrok, "post_telemetry", lambda *args: (_ for _ in ()).throw(TimeoutError()))
+
+    simulate_sensor_ngrok.main()
+
+    assert "request timed out after 3s" in capsys.readouterr().err

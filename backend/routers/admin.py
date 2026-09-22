@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+
 from pydantic import BaseModel, Field
 
 from dependencies import require_supabase_admin
@@ -59,6 +60,33 @@ class EvaluatePanelHealthRequest(BaseModel):
     rated_current: float
 
 
+class CreateMaintenanceTaskRequest(BaseModel):
+    task_name: str = Field(..., min_length=1)
+    task_type: str = Field(default="Inspection")
+    status: str = Field(default="Scheduled")
+    priority: str = Field(default="Medium")
+    scheduled_date: Optional[str] = None
+    panel_id: Optional[str] = None
+    assigned_to: Optional[str] = None
+    description: Optional[str] = None
+    estimated_duration_minutes: Optional[int] = None
+    checklist: Optional[list[str]] = None
+
+
+class UpdateMaintenanceTaskRequest(BaseModel):
+    task_name: Optional[str] = None
+    task_type: Optional[str] = None
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    scheduled_date: Optional[str] = None
+    completed_date: Optional[str] = None
+    panel_id: Optional[str] = None
+    assigned_to: Optional[str] = None
+    description: Optional[str] = None
+    estimated_duration_minutes: Optional[int] = None
+    checklist: Optional[list[str]] = None
+
+
 @router.get("/customers")
 async def list_customers(_: dict = Depends(require_supabase_admin)) -> dict[str, Any]:
     return {"customers": admin_store.sync_google_customers()}
@@ -111,18 +139,25 @@ async def bulk_create_panels(
 
 @router.put("/panels/{panel_id}")
 async def update_panel(
-    panel_id: str, body: UpdatePanelRequest, _: dict = Depends(require_supabase_admin)
+    panel_id: str,
+    body: UpdatePanelRequest,
+    customer_id: str = Query(...),
+    _: dict = Depends(require_supabase_admin),
 ) -> dict[str, Any]:
     payload = body.model_dump(exclude_unset=True)
-    updated = admin_store.update_panel(panel_id, payload=payload)
+    updated = admin_store.update_panel(panel_id, customer_id=customer_id, payload=payload)
     if not updated:
         raise HTTPException(status_code=404, detail="Panel not found")
     return {"panel_id": panel_id, "panel": updated}
 
 
 @router.delete("/panels/{panel_id}")
-async def delete_panel(panel_id: str, _: dict = Depends(require_supabase_admin)) -> dict[str, Any]:
-    deleted = admin_store.delete_panel(panel_id)
+async def delete_panel(
+    panel_id: str,
+    customer_id: str = Query(...),
+    _: dict = Depends(require_supabase_admin),
+) -> dict[str, Any]:
+    deleted = admin_store.delete_panel(panel_id, customer_id=customer_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Panel not found")
     return {"panel_id": panel_id, "deleted": deleted}
@@ -149,3 +184,57 @@ async def evaluate_panel(
         "rated_voltage": body.rated_voltage,
         "rated_current": body.rated_current,
     }
+
+
+# ── Maintenance Tasks ──────────────────────────────────────────────
+
+
+@router.get("/customers/{customer_id}/maintenance")
+async def list_maintenance_tasks(
+    customer_id: str,
+    status: str | None = Query(default=None),
+    task_type: str | None = Query(default=None),
+    panel_id: str | None = Query(default=None),
+    _: dict = Depends(require_supabase_admin),
+) -> dict[str, Any]:
+    tasks = admin_store.list_maintenance_tasks(
+        customer_id, status=status, task_type=task_type, panel_id=panel_id
+    )
+    return {"tasks": tasks}
+
+
+@router.post("/customers/{customer_id}/maintenance")
+async def create_maintenance_task(
+    customer_id: str,
+    body: CreateMaintenanceTaskRequest,
+    _: dict = Depends(require_supabase_admin),
+) -> dict[str, Any]:
+    payload = body.model_dump(exclude_unset=True)
+    task = admin_store.create_maintenance_task(customer_id, payload=payload)
+    if not task:
+        raise HTTPException(status_code=404, detail="Panel does not belong to this customer")
+    return {"customer_id": customer_id, "task": task}
+
+
+@router.put("/maintenance/{task_id}")
+async def update_maintenance_task(
+    task_id: str,
+    body: UpdateMaintenanceTaskRequest,
+    customer_id: str = Query(...),
+    _: dict = Depends(require_supabase_admin),
+) -> dict[str, Any]:
+    payload = body.model_dump(exclude_unset=True)
+    updated = admin_store.update_maintenance_task(task_id, customer_id=customer_id, payload=payload)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Maintenance task not found")
+    return {"task_id": task_id, "task": updated}
+
+
+@router.delete("/maintenance/{task_id}")
+async def delete_maintenance_task(
+    task_id: str, customer_id: str = Query(...), _: dict = Depends(require_supabase_admin)
+) -> dict[str, Any]:
+    deleted = admin_store.delete_maintenance_task(task_id, customer_id=customer_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Maintenance task not found")
+    return {"task_id": task_id, "deleted": deleted}

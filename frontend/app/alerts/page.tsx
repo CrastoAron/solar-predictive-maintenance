@@ -27,87 +27,12 @@ interface DisplayAlert {
   status: "Open" | "Acknowledged" | "Resolved";
 }
 
-const DEFAULT_ALERTS: DisplayAlert[] = [
-  {
-    id: "a-1",
-    dateTime: "Sep 4, 2026 14:23",
-    panel: "P-05",
-    severity: "Critical",
-    alertName: "Low Power Output",
-    details: "Power output 68% below expected. Possible fault or heavy shading.",
-    status: "Open",
-  },
-  {
-    id: "a-2",
-    dateTime: "Sep 4, 2026 11:17",
-    panel: "P-03",
-    severity: "Warning",
-    alertName: "Performance Drop",
-    details: "Output 35% lower than expected for current irradiance.",
-    status: "Open",
-  },
-  {
-    id: "a-3",
-    dateTime: "Sep 4, 2026 09:42",
-    panel: "P-12",
-    severity: "Warning",
-    alertName: "High Temperature",
-    details: "Panel temperature at 68°C (> 65°C threshold).",
-    status: "Open",
-  },
-  {
-    id: "a-4",
-    dateTime: "Sep 3, 2026 16:05",
-    panel: "P-08",
-    severity: "Warning",
-    alertName: "Abnormal Voltage",
-    details: "Voltage 22% lower than normal range.",
-    status: "Acknowledged",
-  },
-  {
-    id: "a-5",
-    dateTime: "Sep 3, 2026 13:21",
-    panel: "P-01",
-    severity: "Info",
-    alertName: "Maintenance Due",
-    details: "Scheduled maintenance in 7 days.",
-    status: "Open",
-  },
-  {
-    id: "a-6",
-    dateTime: "Sep 2, 2026 10:14",
-    panel: "P-15",
-    severity: "Info",
-    alertName: "Irradiance Low",
-    details: "Low sunlight levels detected (120 lux).",
-    status: "Resolved",
-  },
-  {
-    id: "a-7",
-    dateTime: "Sep 2, 2026 08:33",
-    panel: "P-06",
-    severity: "Resolved",
-    alertName: "Communication Restored",
-    details: "Panel back online after 5 minutes downtime.",
-    status: "Resolved",
-  },
-  {
-    id: "a-8",
-    dateTime: "Sep 1, 2026 17:46",
-    panel: "P-14",
-    severity: "Info",
-    alertName: "System Update",
-    details: "Firmware updated successfully to v1.2.3.",
-    status: "Resolved",
-  },
-];
-
 export default function AlertsPage() {
   const { user } = useAuth();
   const router = useRouter();
   const { setCriticalAlertCount } = useAppContext();
 
-  const [alertsList, setAlertsList] = useState<DisplayAlert[]>(DEFAULT_ALERTS);
+  const [alertsList, setAlertsList] = useState<DisplayAlert[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [panelFilter, setPanelFilter] = useState("All Panels");
   const [timeFilter, setTimeFilter] = useState("Last 7 days");
@@ -125,7 +50,7 @@ export default function AlertsPage() {
       try {
         const d = await getAlerts();
         if (cancelled) return;
-        if (d.alerts && d.alerts.length > 0) {
+        if (d.alerts) {
           const mapped: DisplayAlert[] = d.alerts.map((a: ApiAlert, idx: number) => ({
             id: a.id || `api-${idx}`,
             dateTime: new Date(a.timestamp).toLocaleString("en-US", {
@@ -136,7 +61,7 @@ export default function AlertsPage() {
               minute: "2-digit",
               hour12: false,
             }),
-            panel: `P-0${(idx % 5) + 1}`,
+            panel: "Unavailable",
             severity: a.severity === "high" ? "Critical" : a.severity === "medium" ? "Warning" : "Info",
             alertName: a.type || "Sensor Alert",
             details: a.message,
@@ -160,8 +85,15 @@ export default function AlertsPage() {
       item.details.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.panel.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesPanel = panelFilter === "All Panels" || item.panel === panelFilter;
-    return matchesSearch && matchesPanel;
+    const ageMs = Date.now() - new Date(item.dateTime).getTime();
+    const rangeMs = timeFilter === "Last 24 hours" ? 24 * 60 * 60 * 1000 : timeFilter === "Last 30 days" ? 30 * 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+    return matchesSearch && matchesPanel && ageMs <= rangeMs;
   });
+
+  const criticalCount = alertsList.filter((item) => item.severity === "Critical" && item.status !== "Resolved").length;
+  const warningCount = alertsList.filter((item) => item.severity === "Warning" && item.status !== "Resolved").length;
+  const infoCount = alertsList.filter((item) => item.severity === "Info" && item.status !== "Resolved").length;
+  const resolvedCount = alertsList.filter((item) => item.status === "Resolved").length;
 
   const getSeverityBadge = (sev: string) => {
     switch (sev) {
@@ -259,11 +191,6 @@ export default function AlertsPage() {
               className="bg-[#121824] border border-[#1e293b] text-slate-200 rounded-xl px-3.5 py-2 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-orange-500/50"
             >
               <option value="All Panels">All Panels</option>
-              <option value="P-01">Panel P-01</option>
-              <option value="P-03">Panel P-03</option>
-              <option value="P-05">Panel P-05</option>
-              <option value="P-08">Panel P-08</option>
-              <option value="P-12">Panel P-12</option>
             </select>
 
             {/* Time Filter Dropdown */}
@@ -287,7 +214,7 @@ export default function AlertsPage() {
             </div>
             <div>
               <p className="text-xs font-semibold text-slate-400">Critical</p>
-              <p className="text-3xl font-extrabold text-white mt-0.5">1</p>
+              <p className="text-3xl font-extrabold text-white mt-0.5">{criticalCount}</p>
               <p className="text-[11px] text-slate-400 mt-1">Requires immediate action</p>
             </div>
           </div>
@@ -298,7 +225,7 @@ export default function AlertsPage() {
             </div>
             <div>
               <p className="text-xs font-semibold text-slate-400">Warning</p>
-              <p className="text-3xl font-extrabold text-white mt-0.5">3</p>
+              <p className="text-3xl font-extrabold text-white mt-0.5">{warningCount}</p>
               <p className="text-[11px] text-slate-400 mt-1">Needs attention</p>
             </div>
           </div>
@@ -309,7 +236,7 @@ export default function AlertsPage() {
             </div>
             <div>
               <p className="text-xs font-semibold text-slate-400">Info</p>
-              <p className="text-3xl font-extrabold text-white mt-0.5">4</p>
+              <p className="text-3xl font-extrabold text-white mt-0.5">{infoCount}</p>
               <p className="text-[11px] text-slate-400 mt-1">For your information</p>
             </div>
           </div>
@@ -320,7 +247,7 @@ export default function AlertsPage() {
             </div>
             <div>
               <p className="text-xs font-semibold text-slate-400">Resolved</p>
-              <p className="text-3xl font-extrabold text-white mt-0.5">12</p>
+              <p className="text-3xl font-extrabold text-white mt-0.5">{resolvedCount}</p>
               <p className="text-[11px] text-slate-400 mt-1">In the last 7 days</p>
             </div>
           </div>

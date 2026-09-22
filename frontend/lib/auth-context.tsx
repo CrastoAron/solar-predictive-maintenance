@@ -16,7 +16,7 @@ import {
 import { auth, googleProvider } from "./firebase";
 import { supabase } from "./supabase";
 import { API_BASE, apiHeaders } from "./api-config";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 const REDIRECT_TARGET_KEY = "auth-redirect-target";
 
@@ -56,6 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [role, setRole] = useState("customer");
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+  const pathname = usePathname();
 
   const resolveRole = async (firebaseUser: FirebaseUser | null) => {
     if (!firebaseUser) {
@@ -72,7 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (preferredTarget === "admin") {
       setRole("admin");
-      router.replace("/admin/dashboard");
+      if (pathname === "/login") router.replace("/admin/dashboard");
       return;
     }
 
@@ -88,7 +89,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const nextRole = (payload.role || "customer").toLowerCase();
         setRole(nextRole);
         persistRedirectTarget(nextRole === "admin" ? "admin" : "customer");
-        router.replace(nextRole === "admin" ? "/admin/dashboard" : "/dashboard");
+        if (pathname === "/login") {
+          router.replace(nextRole === "admin" ? "/admin/dashboard" : "/dashboard");
+        }
         return;
       }
     } catch {
@@ -97,7 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     setRole("customer");
     persistRedirectTarget("customer");
-    router.replace("/dashboard");
+    if (pathname === "/login") router.replace("/dashboard");
   };
 
   useEffect(() => {
@@ -105,8 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ? onAuthStateChanged(auth, (firebaseUser) => {
           if (firebaseUser) {
             setUser(firebaseUser);
-            setLoading(false);
-            void resolveRole(firebaseUser);
+            void resolveRole(firebaseUser).finally(() => setLoading(false));
           } else if (!supabase) {
             setUser(null);
             setLoading(false);
@@ -130,7 +132,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       unsubscribeFirebase();
       supabaseSubscription?.data.subscription.unsubscribe();
     };
-  }, []);
+  }, [pathname, router]);
 
   const signInWithGoogle = async () => {
     if (!auth) {

@@ -3,11 +3,13 @@
 import { useState, useEffect } from "react";
 import { ChevronDown, Calendar, RefreshCw, Layers } from "lucide-react";
 import { format } from "date-fns";
+import { PanelData } from "@/lib/api";
 
 interface HeaderProps {
   title: string;
   subtitle: string;
   selectedPanel?: string;
+  panels?: PanelData[];
   onPanelChange?: (panel: string) => void;
   statusBadge?: {
     text: string;
@@ -17,23 +19,11 @@ interface HeaderProps {
   refreshing?: boolean;
 }
 
-const PANELS_LIST = [
-  "Panel 01",
-  "Panel 02",
-  "Panel 03",
-  "Panel 04",
-  "Panel 05",
-  "Panel 06",
-  "Panel 07",
-  "Panel 08",
-  "Panel 09",
-  "Panel 10",
-];
-
 export default function Header({
   title,
   subtitle,
-  selectedPanel = "Panel 01",
+  selectedPanel = "",
+  panels = [],
   onPanelChange,
   statusBadge,
   onRefresh,
@@ -42,6 +32,17 @@ export default function Header({
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [currentPanel, setCurrentPanel] = useState(selectedPanel);
   const [now, setNow] = useState<Date | null>(null);
+
+  useEffect(() => {
+    setCurrentPanel(selectedPanel);
+  }, [selectedPanel]);
+
+  useEffect(() => {
+    if (panels.length > 0 && !panels.some((panel) => panel.name === currentPanel)) {
+      setCurrentPanel(panels[0].name);
+      onPanelChange?.(panels[0].name);
+    }
+  }, [panels, currentPanel, onPanelChange]);
 
   useEffect(() => {
     setNow(new Date());
@@ -89,26 +90,29 @@ export default function Header({
             className="flex items-center gap-2.5 px-3.5 py-2 rounded-xl bg-[#121824] border border-[#1e293b] text-slate-200 text-sm font-medium hover:border-slate-600 transition-colors shadow-sm"
           >
             <Layers className="w-4 h-4 text-orange-400" />
-            <span>{currentPanel}</span>
+            <span>{currentPanel || "No configured panels"}</span>
             <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${dropdownOpen ? "rotate-180" : ""}`} />
           </button>
 
           {dropdownOpen && (
             <div className="absolute right-0 mt-2 w-48 rounded-xl bg-[#161c2b] border border-[#232d42] shadow-2xl z-50 py-1 max-h-64 overflow-y-auto animate-fade-in">
-              {PANELS_LIST.map((panel) => (
+              {panels.map((panel) => (
                 <button
-                  key={panel}
-                  onClick={() => handleSelectPanel(panel)}
+                  key={panel.id}
+                  onClick={() => handleSelectPanel(panel.name)}
                   className={`w-full flex items-center gap-2 px-4 py-2.5 text-xs text-left font-medium transition-colors ${
-                    currentPanel === panel
+                    currentPanel === panel.name
                       ? "bg-orange-500/15 text-orange-400"
                       : "text-slate-300 hover:bg-white/5 hover:text-white"
                   }`}
                 >
                   <Layers className="w-3.5 h-3.5" />
-                  {panel}
+                  {panel.name}
                 </button>
               ))}
+              {panels.length === 0 && (
+                <span className="block px-4 py-2.5 text-xs text-slate-500">No configured panels</span>
+              )}
             </div>
           )}
         </div>

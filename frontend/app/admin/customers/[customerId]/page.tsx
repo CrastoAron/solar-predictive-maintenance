@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -16,6 +16,8 @@ import {
   LogOut,
   Layers,
   X,
+  Settings,
+  Wrench,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { API_BASE, apiHeaders } from "@/lib/api-config";
@@ -47,6 +49,7 @@ interface CustomerDetail {
 export default function CustomerConfigPage() {
   const params = useParams<{ customerId: string }>();
   const router = useRouter();
+  const pathname = usePathname();
   const { user, role, loading, signOut } = useAuth();
 
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);
@@ -171,7 +174,7 @@ export default function CustomerConfigPage() {
     setSavingPanel(true);
     try {
       const res = await fetch(
-        `${API_BASE}/admin/panels/${selectedPanel.id}`,
+        `${API_BASE}/admin/panels/${selectedPanel.id}?customer_id=${encodeURIComponent(params.customerId)}`,
         {
           method: "PUT",
           headers: apiHeaders(token, true),
@@ -210,7 +213,7 @@ export default function CustomerConfigPage() {
 
     try {
       const res = await fetch(
-        `${API_BASE}/admin/panels/${panelId}`,
+        `${API_BASE}/admin/panels/${panelId}?customer_id=${encodeURIComponent(params.customerId)}`,
         {
           method: "DELETE",
           headers: apiHeaders(token),
@@ -263,6 +266,32 @@ export default function CustomerConfigPage() {
               <h1 className="text-xl font-bold tracking-tight text-white">{customer?.name || "Solar Customer"}</h1>
             </div>
           </div>
+
+          {/* Nav Links */}
+          <nav className="flex items-center gap-1 bg-slate-900/80 p-1 rounded-xl border border-slate-800">
+            <Link
+              href={`/admin/customers/${params.customerId}`}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+                !pathname.includes("/maintenance")
+                  ? "bg-orange-500 text-white shadow-md shadow-orange-500/25"
+                  : "text-slate-400 hover:text-white hover:bg-slate-800"
+              }`}
+            >
+              <Settings className="h-3.5 w-3.5" />
+              Setup
+            </Link>
+            <Link
+              href={`/admin/customers/${params.customerId}/maintenance`}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+                pathname.includes("/maintenance")
+                  ? "bg-orange-500 text-white shadow-md shadow-orange-500/25"
+                  : "text-slate-400 hover:text-white hover:bg-slate-800"
+              }`}
+            >
+              <Wrench className="h-3.5 w-3.5" />
+              Maintenance
+            </Link>
+          </nav>
 
           <div className="flex items-center gap-3">
             <button

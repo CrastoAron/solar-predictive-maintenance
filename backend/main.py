@@ -13,6 +13,7 @@ from routers.history import router as history_router
 from routers.hardware_status import router as hardware_status_router
 from routers.live import router as live_router
 from routers.maintenance import router as maintenance_router
+from routers.panels import router as panels_router
 from routers.predictions import router as predictions_router
 from routers.telemetry import router as telemetry_router
 from services.influx_client import get_influx_client
@@ -68,6 +69,7 @@ app.include_router(expected_power_router)
 app.include_router(predictions_router)
 app.include_router(alerts_router)
 app.include_router(maintenance_router)
+app.include_router(panels_router)
 app.include_router(diagnostics_router)
 app.include_router(admin_router)
 app.include_router(telemetry_router)
