@@ -110,10 +110,10 @@ export default function AdminDashboardPage() {
           <div className="relative z-10 max-w-2xl">
             <p className="text-xs font-semibold uppercase tracking-wider text-orange-400">Admin Control Panel</p>
             <h2 className="mt-2 text-3xl font-extrabold tracking-tight text-white sm:text-4xl">
-              Solar Panel & Cell Matrix Configuration
+              Solar Panel Configuration
             </h2>
             <p className="mt-3 text-sm text-slate-300 leading-relaxed">
-              Manage customer installations, map ESP32 IoT logger nodes to individual panels, and calibrate solar cell matrix counts (rows × columns) and rated specs.
+              Manage customer installations, map ESP32 IoT logger nodes to individual panels, and configure rated specifications.
             </p>
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <Link
@@ -142,13 +142,13 @@ export default function AdminDashboardPage() {
 
           <div className="group rounded-2xl border border-slate-800 bg-slate-900/70 p-6 backdrop-blur-xl transition hover:border-slate-700 hover:bg-slate-900">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-400">Cell Matrix Setup</span>
+              <span className="text-xs font-medium text-slate-400">Panel Setup</span>
               <div className="rounded-xl bg-blue-500/10 p-2.5 text-blue-400 border border-blue-500/20">
                 <Grid className="h-5 w-5" />
               </div>
             </div>
             <p className="mt-4 text-3xl font-extrabold text-white">Active</p>
-            <p className="mt-1 text-xs text-slate-500">Solar cell rows × cols matrix</p>
+            <p className="mt-1 text-xs text-slate-500">Logger mapping and rated specifications</p>
           </div>
 
           <div className="group rounded-2xl border border-slate-800 bg-slate-900/70 p-6 backdrop-blur-xl transition hover:border-slate-700 hover:bg-slate-900">

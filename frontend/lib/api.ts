@@ -32,10 +32,6 @@ export interface PanelData {
   name: string;
   esp32_id: string | null;
   array_id: string;
-  cell_rows: number;
-  cell_cols: number;
-  row_index: number;
-  col_index: number;
   panel_width_mm: number | null;
   panel_height_mm: number | null;
   rated_voltage: number | null;
@@ -44,8 +40,6 @@ export interface PanelData {
   setup: {
     id: string;
     name: string;
-    rows: number;
-    cols: number;
   };
 }
 
@@ -69,6 +63,9 @@ export interface Alert {
   message: string;
   timestamp: string;
   resolved: boolean;
+  device_id?: string | null;
+  panel_id?: string | null;
+  panel_name?: string | null;
 }
 
 export interface AlertsData {
@@ -194,8 +191,10 @@ export const getPanels = () => apiFetch<PanelData[]>("/api/panels");
 
 export const getServiceHistory = () => apiFetch<MaintenanceTask[]>("/api/service-history");
 
-export const getAlerts = () =>
-  apiFetch<AlertsData>("/api/alerts");
+export const getAlerts = (deviceId?: string) => {
+  const params = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : "";
+  return apiFetch<AlertsData>(`/api/alerts${params}`);
+};
 
 export const getHardwareStatus = (deviceId?: string) => {
   const params = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : "";

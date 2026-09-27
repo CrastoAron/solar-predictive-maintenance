@@ -41,6 +41,9 @@ class AlertItem(BaseModel):
     message: str
     timestamp: str
     resolved: bool
+    device_id: Optional[str] = None
+    panel_id: Optional[str] = None
+    panel_name: Optional[str] = None
 
 
 class AlertsResponse(BaseModel):

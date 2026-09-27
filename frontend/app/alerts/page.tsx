@@ -19,6 +19,7 @@ import {
 
 interface DisplayAlert {
   id: string;
+  timestamp: string;
   dateTime: string;
   panel: string;
   severity: "Critical" | "Warning" | "Info" | "Resolved";
@@ -35,8 +36,10 @@ export default function AlertsPage() {
   const [alertsList, setAlertsList] = useState<DisplayAlert[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [panelFilter, setPanelFilter] = useState("All Panels");
-  const [timeFilter, setTimeFilter] = useState("Last 7 days");
+  const [timeFilter, setTimeFilter] = useState("All time");
   const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     if (!user) router.replace("/login");
@@ -44,15 +47,17 @@ export default function AlertsPage() {
 
   useEffect(() => {
     if (!user) return;
-    const cancelled = false;
+    let cancelled = false;
 
     const fetchApiAlerts = async () => {
+      setLoading(true);
+      setLoadError(false);
       try {
         const d = await getAlerts();
         if (cancelled) return;
-        if (d.alerts) {
-          const mapped: DisplayAlert[] = d.alerts.map((a: ApiAlert, idx: number) => ({
+        const mapped: DisplayAlert[] = d.alerts.map((a: ApiAlert, idx: number) => ({
             id: a.id || `api-${idx}`,
+            timestamp: a.timestamp,
             dateTime: new Date(a.timestamp).toLocaleString("en-US", {
               month: "short",
               day: "numeric",
@@ -61,22 +66,29 @@ export default function AlertsPage() {
               minute: "2-digit",
               hour12: false,
             }),
-            panel: "Unavailable",
+            panel: a.panel_name || a.device_id || "Unassigned panel",
             severity: a.severity === "high" ? "Critical" : a.severity === "medium" ? "Warning" : "Info",
             alertName: a.type || "Sensor Alert",
             details: a.message,
             status: a.resolved ? "Resolved" : "Open",
           }));
-          setAlertsList(mapped);
-          const criticalCount = d.alerts.filter((a) => a.severity === "high" && !a.resolved).length;
-          setCriticalAlertCount(criticalCount);
-        }
+        setAlertsList(mapped);
+        const criticalCount = d.alerts.filter((a) => a.severity === "high" && !a.resolved).length;
+        setCriticalAlertCount(criticalCount);
       } catch (e) {
         console.error(e);
+        if (!cancelled) {
+          setAlertsList([]);
+          setLoadError(true);
+          setCriticalAlertCount(0);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     };
 
-    fetchApiAlerts();
+    void fetchApiAlerts();
+    return () => { cancelled = true; };
   }, [user, setCriticalAlertCount]);
 
   const filtered = alertsList.filter((item) => {
@@ -85,10 +97,16 @@ export default function AlertsPage() {
       item.details.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.panel.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesPanel = panelFilter === "All Panels" || item.panel === panelFilter;
-    const ageMs = Date.now() - new Date(item.dateTime).getTime();
+    const ageMs = Date.now() - new Date(item.timestamp).getTime();
     const rangeMs = timeFilter === "Last 24 hours" ? 24 * 60 * 60 * 1000 : timeFilter === "Last 30 days" ? 30 * 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
-    return matchesSearch && matchesPanel && ageMs <= rangeMs;
+    const matchesTime = timeFilter === "All time" || ageMs <= rangeMs;
+    return matchesSearch && matchesPanel && matchesTime;
   });
+
+  const pageSize = 8;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const visibleAlerts = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const panelOptions = Array.from(new Set(alertsList.map((item) => item.panel)));
 
   const criticalCount = alertsList.filter((item) => item.severity === "Critical" && item.status !== "Resolved").length;
   const warningCount = alertsList.filter((item) => item.severity === "Warning" && item.status !== "Resolved").length;
@@ -179,29 +197,24 @@ export default function AlertsPage() {
                 type="text"
                 placeholder="Search alerts..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
                 className="w-full bg-[#121824] border border-[#1e293b] text-white text-xs pl-10 pr-4 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/50 placeholder:text-slate-500"
               />
             </div>
 
             {/* Panels Filter Dropdown */}
-            <select
-              value={panelFilter}
-              onChange={(e) => setPanelFilter(e.target.value)}
-              className="bg-[#121824] border border-[#1e293b] text-slate-200 rounded-xl px-3.5 py-2 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-orange-500/50"
-            >
-              <option value="All Panels">All Panels</option>
-            </select>
+            
 
             {/* Time Filter Dropdown */}
             <select
               value={timeFilter}
-              onChange={(e) => setTimeFilter(e.target.value)}
+              onChange={(e) => { setTimeFilter(e.target.value); setPage(1); }}
               className="bg-[#121824] border border-[#1e293b] text-slate-200 rounded-xl px-3.5 py-2 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-orange-500/50"
             >
               <option value="Last 7 days">Last 7 days</option>
               <option value="Last 24 hours">Last 24 hours</option>
               <option value="Last 30 days">Last 30 days</option>
+              <option value="All time">All time</option>
             </select>
           </div>
         </div>
@@ -287,13 +300,17 @@ export default function AlertsPage() {
                       Status <ArrowUpDown className="w-3 h-3" />
                     </span>
                   </th>
-                  <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider text-right">
-                    Actions
-                  </th>
+                  
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#1e293b]/60">
-                {filtered.map((item) => (
+                {loading ? (
+                  <tr><td colSpan={7} className="px-6 py-12 text-center text-sm text-slate-400">Loading alerts...</td></tr>
+                ) : loadError ? (
+                  <tr><td colSpan={7} className="px-6 py-12 text-center text-sm text-red-400">Could not load alerts. Check your connection and try again.</td></tr>
+                ) : visibleAlerts.length === 0 ? (
+                  <tr><td colSpan={7} className="px-6 py-12 text-center text-sm text-slate-400">No alerts match the current filters.</td></tr>
+                ) : visibleAlerts.map((item) => (
                   <tr key={item.id} className="hover:bg-white/[0.02] transition-colors">
                     <td className="px-6 py-4 text-xs text-slate-300 font-mono">
                       {item.dateTime}
@@ -313,16 +330,6 @@ export default function AlertsPage() {
                     <td className="px-6 py-4 text-xs">
                       {getStatusBadge(item.status)}
                     </td>
-                    <td className="px-6 py-4 text-xs text-right">
-                      <div className="inline-flex items-center gap-2">
-                        <button className="px-3.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 text-xs font-semibold transition-colors">
-                          View
-                        </button>
-                        <button className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors">
-                          <MoreHorizontal className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -332,16 +339,18 @@ export default function AlertsPage() {
           {/* Pagination Footer */}
           <div className="flex flex-col sm:flex-row items-center justify-between px-6 py-4 border-t border-[#1e293b] bg-[#0f141f] gap-4">
             <span className="text-xs text-slate-400 font-medium">
-              Showing 1–8 of 20 alerts
+              Showing {filtered.length === 0 ? 0 : (page - 1) * pageSize + 1}–{Math.min(page * pageSize, filtered.length)} of {filtered.length} alerts
             </span>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setPage(Math.max(1, page - 1))}
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                disabled={page === 1}
+                aria-label="Previous page"
                 className="p-2 rounded-xl bg-[#121824] border border-[#1e293b] text-slate-400 hover:text-white transition-colors"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              {[1, 2, 3].map((p) => (
+              {Array.from({ length: totalPages }, (_, index) => index + 1).map((p) => (
                 <button
                   key={p}
                   onClick={() => setPage(p)}
@@ -355,7 +364,9 @@ export default function AlertsPage() {
                 </button>
               ))}
               <button
-                onClick={() => setPage(Math.min(3, page + 1))}
+                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                disabled={page === totalPages}
+                aria-label="Next page"
                 className="p-2 rounded-xl bg-[#121824] border border-[#1e293b] text-slate-400 hover:text-white transition-colors"
               >
                 <ChevronRight className="w-4 h-4" />

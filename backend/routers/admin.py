@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from dependencies import require_supabase_admin
 from diagnostics.panel_health import evaluate_panel_health
 from services.admin_store import admin_store
+from services.influx_client import get_influx_client
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -20,21 +21,12 @@ class CreateCustomerRequest(BaseModel):
 
 
 class CreateArrayRequest(BaseModel):
-    rows: int = Field(default=1, ge=1)
-    cols: int = Field(default=1, ge=1)
     name: Optional[str] = "Main Array"
-
-
-class BulkCreatePanelsRequest(BaseModel):
-    rows: int = Field(default=1, ge=1)
-    cols: int = Field(default=1, ge=1)
 
 
 class CreatePanelRequest(BaseModel):
     name: Optional[str] = None
     esp32_id: Optional[str] = ""
-    cell_rows: Optional[int] = 3
-    cell_cols: Optional[int] = 4
     rated_voltage: Optional[float] = 38.5
     rated_current: Optional[float] = 9.8
     panel_width_mm: Optional[int] = 1650
@@ -44,8 +36,6 @@ class CreatePanelRequest(BaseModel):
 class UpdatePanelRequest(BaseModel):
     name: Optional[str] = None
     esp32_id: Optional[str] = None
-    cell_rows: Optional[int] = None
-    cell_cols: Optional[int] = None
     rated_voltage: Optional[float] = None
     rated_current: Optional[float] = None
     panel_width_mm: Optional[int] = None
@@ -110,6 +100,35 @@ async def get_customer(customer_id: str, _: dict = Depends(require_supabase_admi
     return detail
 
 
+@router.get("/customers/{customer_id}/alerts")
+async def list_customer_alerts(
+    customer_id: str, _: dict = Depends(require_supabase_admin)
+) -> dict[str, Any]:
+    customer = admin_store.get_customer_detail(customer_id)
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    influx = get_influx_client()
+    alerts = []
+    for panel in customer.get("panels", []):
+        device_id = panel.get("esp32_id")
+        if not device_id:
+            continue
+        for alert in influx.get_latest_alerts(device_id=device_id, limit=50):
+            alerts.append(
+                {
+                    **alert,
+                    "id": alert.get("id") or f"{device_id}-{alert.get('type', 'fault')}-{alert.get('timestamp', '')}",
+                    "panel_id": panel["id"],
+                    "panel_name": panel.get("name") or panel["id"],
+                    "esp32_id": device_id,
+                }
+            )
+
+    alerts.sort(key=lambda alert: alert.get("timestamp", ""), reverse=True)
+    return {"alerts": alerts}
+
+
 @router.post("/customers/{customer_id}/panels")
 async def add_panel_to_customer(
     customer_id: str, body: CreatePanelRequest, _: dict = Depends(require_supabase_admin)
@@ -123,18 +142,8 @@ async def add_panel_to_customer(
 async def create_array(
     customer_id: str, body: CreateArrayRequest, _: dict = Depends(require_supabase_admin)
 ) -> dict[str, Any]:
-    array_ = admin_store.create_array(
-        customer_id=customer_id, rows=body.rows, cols=body.cols, name=body.name or "Main Array"
-    )
+    array_ = admin_store.create_array(customer_id=customer_id, name=body.name or "Main Array")
     return {"customer_id": customer_id, "array": array_}
-
-
-@router.post("/arrays/{array_id}/panels")
-async def bulk_create_panels(
-    array_id: str, body: BulkCreatePanelsRequest, _: dict = Depends(require_supabase_admin)
-) -> dict[str, Any]:
-    panels = admin_store.bulk_create_panels(array_id=array_id, rows=body.rows, cols=body.cols)
-    return {"array_id": array_id, "panels": panels}
 
 
 @router.put("/panels/{panel_id}")

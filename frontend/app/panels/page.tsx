@@ -3,16 +3,14 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { getPanels, PanelData } from "@/lib/api";
+import { getExpectedPower, getHistory, getLive, getPanels, PanelData } from "@/lib/api";
 import NavSidebar from "@/components/ui/NavSidebar";
-import Header from "@/components/ui/Header";
 import {
   LayoutGrid,
   Search,
   ChevronLeft,
   ChevronRight,
   ArrowUpDown,
-  ArrowRight,
   CheckCircle2,
   AlertTriangle,
   XCircle,
@@ -34,9 +32,10 @@ export default function PanelsPage() {
   const router = useRouter();
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [rangeFilter, setRangeFilter] = useState("P-01 - P-05");
   const [page, setPage] = useState(1);
   const [panels, setPanels] = useState<PanelItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     if (!user) router.replace("/login");
@@ -44,23 +43,92 @@ export default function PanelsPage() {
 
   useEffect(() => {
     if (!user) return;
-    getPanels()
-      .then((records: PanelData[]) => setPanels(records.map((panel) => ({
-        id: panel.id,
-        name: panel.name,
-        setup: panel.setup,
-        status: "Unavailable",
-        currentPower: null,
-        todayGen: null,
-        performance: null,
-        lastUpdated: "Unavailable",
-      }))))
-      .catch(() => setPanels([]));
+    let cancelled = false;
+
+    const loadPanels = async () => {
+      setLoading(true);
+      setLoadError(false);
+      try {
+        const records: PanelData[] = await getPanels();
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+        const now = new Date();
+        const panelItems = await Promise.all(records.map(async (panel): Promise<PanelItem> => {
+          const unavailable: PanelItem = {
+            id: panel.id,
+            name: panel.name,
+            setup: panel.setup,
+            status: "Unavailable",
+            currentPower: null,
+            todayGen: null,
+            performance: null,
+            lastUpdated: "No recent data",
+          };
+          if (!panel.esp32_id) return unavailable;
+
+          const [liveResult, expectedResult, historyResult] = await Promise.allSettled([
+            getLive(panel.esp32_id),
+            getExpectedPower(panel.esp32_id),
+            getHistory(startOfDay.toISOString(), now.toISOString(), "power", panel.esp32_id),
+          ]);
+          const live = liveResult.status === "fulfilled" ? liveResult.value : null;
+          const expected = expectedResult.status === "fulfilled" ? expectedResult.value : null;
+          const history = historyResult.status === "fulfilled" ? historyResult.value.data : [];
+          const points = history
+            .map((point) => ({ time: new Date(point.timestamp).getTime(), value: point.value }))
+            .filter((point) => Number.isFinite(point.time))
+            .sort((a, b) => a.time - b.time);
+          let wattHours = 0;
+          let intervals = 0;
+          for (let index = 1; index < points.length; index += 1) {
+            const hours = (points[index].time - points[index - 1].time) / 3_600_000;
+            if (hours > 0 && hours <= 0.25) {
+              wattHours += ((points[index - 1].value + points[index].value) / 2) * hours;
+              intervals += 1;
+            }
+          }
+          const operationalStatus = expected?.operational_status;
+          const status = operationalStatus === "Normal"
+            ? "Healthy"
+            : operationalStatus === "Underperforming"
+              ? "Warning"
+              : operationalStatus === "Strong anomaly"
+                ? "Critical"
+                : "Unavailable";
+          const timestamp = live?.timestamp || expected?.timestamp;
+
+          return {
+            ...unavailable,
+            status,
+            currentPower: live?.power ?? expected?.actual_power ?? null,
+            todayGen: intervals > 0 ? Math.round(wattHours) : null,
+            performance: expected?.performance_ratio == null
+              ? null
+              : Math.min(100, Math.max(0, Math.round(expected.performance_ratio * 100))),
+            lastUpdated: timestamp ? new Date(timestamp).toLocaleString() : "No recent data",
+          };
+        }));
+        if (!cancelled) setPanels(panelItems);
+      } catch {
+        if (!cancelled) {
+          setPanels([]);
+          setLoadError(true);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void loadPanels();
+    return () => { cancelled = true; };
   }, [user]);
 
   const filteredPanels = panels.filter((p) =>
-    p.id.toLowerCase().includes(searchQuery.toLowerCase())
+    `${p.id} ${p.name} ${p.setup.name}`.toLowerCase().includes(searchQuery.toLowerCase())
   );
+  const pageSize = 5;
+  const totalPages = Math.max(1, Math.ceil(filteredPanels.length / pageSize));
+  const visiblePanels = filteredPanels.slice((page - 1) * pageSize, page * pageSize);
 
   const getProgressColor = (perf: number) => {
     if (perf >= 80) return "bg-emerald-500";
@@ -112,18 +180,6 @@ export default function PanelsPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            {/* Range Select Dropdown */}
-            <select
-              value={rangeFilter}
-              onChange={(e) => setRangeFilter(e.target.value)}
-              className="bg-[#121824] border border-[#1e293b] text-slate-200 rounded-xl px-3.5 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-500/50"
-            >
-              <option value="P-01 - P-05">P-01 – P-05</option>
-              <option value="P-06 - P-10">P-06 – P-10</option>
-              <option value="P-11 - P-15">P-11 – P-15</option>
-              <option value="P-16 - P-20">P-16 – P-20</option>
-            </select>
-
             {/* Search Bar */}
             <div className="relative w-full sm:w-64">
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -131,7 +187,10 @@ export default function PanelsPage() {
                 type="text"
                 placeholder="Search panels..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setPage(1);
+                }}
                 className="w-full bg-[#121824] border border-[#1e293b] text-white text-xs pl-10 pr-4 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/50 placeholder:text-slate-500"
               />
             </div>
@@ -181,6 +240,10 @@ export default function PanelsPage() {
           </div>
         </div>
 
+        {loadError && (
+          <p className="mb-4 text-sm text-red-400" role="alert">Could not load panels. Check your connection and try again.</p>
+        )}
+
         {/* Table Container */}
         <div className="solar-card overflow-hidden">
           <div className="overflow-x-auto">
@@ -207,7 +270,7 @@ export default function PanelsPage() {
                   </th>
                   <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">
                     <span className="flex items-center gap-1 cursor-pointer hover:text-white">
-                      Today's Generation <ArrowUpDown className="w-3 h-3" />
+                      Today&apos;s Generation <ArrowUpDown className="w-3 h-3" />
                     </span>
                   </th>
                   <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">
@@ -220,13 +283,14 @@ export default function PanelsPage() {
                       Last Updated <ArrowUpDown className="w-3 h-3" />
                     </span>
                   </th>
-                  <th className="px-6 py-4 text-xs font-semibold text-slate-400 uppercase tracking-wider text-right">
-                    Actions
-                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#1e293b]/60">
-                {filteredPanels.slice(0, 5).map((panel) => (
+                {loading ? (
+                  <tr><td colSpan={7} className="px-6 py-12 text-center text-sm text-slate-400">Loading panel telemetry...</td></tr>
+                ) : visiblePanels.length === 0 ? (
+                  <tr><td colSpan={7} className="px-6 py-12 text-center text-sm text-slate-400">{loadError ? "Panel data is unavailable." : "No panels match your search."}</td></tr>
+                ) : visiblePanels.map((panel) => (
                   <tr key={panel.id} className="hover:bg-white/[0.02] transition-colors">
                     <td className="px-6 py-4 text-sm font-bold text-white flex items-center gap-3">
                       <div className="p-2 rounded-lg bg-sky-500/10 text-sky-400">
@@ -236,7 +300,6 @@ export default function PanelsPage() {
                     </td>
                     <td className="px-6 py-4 text-sm text-slate-300">
                       <div className="font-medium text-white">{panel.setup.name}</div>
-                      <div className="text-xs text-slate-500">{panel.setup.rows} × {panel.setup.cols} array</div>
                     </td>
                     <td className="px-6 py-4 text-sm">{getStatusBadge(panel.status)}</td>
                     <td className="px-6 py-4 text-sm font-mono font-medium text-white">
@@ -248,23 +311,18 @@ export default function PanelsPage() {
                     <td className="px-6 py-4 text-sm">
                       <div className="flex items-center gap-3 w-44">
                         <span className="font-mono text-xs font-bold text-white w-9">
-                          {panel.performance == null ? "—" : `${panel.performance}%`}
+                          {panel.performance == null ? "—" : `${Math.min(100, panel.performance)}%`}
                         </span>
                         <div className="flex-1 h-2 rounded-full bg-slate-800 overflow-hidden">
                           <div
                             className={`h-full rounded-full ${getProgressColor(panel.performance ?? 0)}`}
-                            style={{ width: `${panel.performance ?? 0}%` }}
+                            style={{ width: `${Math.min(100, Math.max(0, panel.performance ?? 0))}%` }}
                           />
                         </div>
                       </div>
                     </td>
                     <td className="px-6 py-4 text-xs text-slate-400 font-mono">
                       {panel.lastUpdated}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-right">
-                      <button className="px-3.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 text-xs font-semibold transition-colors inline-flex items-center gap-1.5">
-                        View <ArrowRight className="w-3.5 h-3.5" />
-                      </button>
                     </td>
                   </tr>
                 ))}
@@ -275,16 +333,18 @@ export default function PanelsPage() {
           {/* Pagination Footer */}
           <div className="flex flex-col sm:flex-row items-center justify-between px-6 py-4 border-t border-[#1e293b] bg-[#0f141f] gap-4">
             <span className="text-xs text-slate-400 font-medium">
-              Showing {filteredPanels.length === 0 ? 0 : (page - 1) * 5 + 1}–{Math.min(page * 5, filteredPanels.length)} of {filteredPanels.length} panels
+              Showing {filteredPanels.length === 0 ? 0 : (page - 1) * pageSize + 1}–{Math.min(page * pageSize, filteredPanels.length)} of {filteredPanels.length} panels
             </span>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setPage(Math.max(1, page - 1))}
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                disabled={page === 1}
+                aria-label="Previous page"
                 className="p-2 rounded-xl bg-[#121824] border border-[#1e293b] text-slate-400 hover:text-white transition-colors"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              {[1, 2, 3, 4].map((p) => (
+              {Array.from({ length: totalPages }, (_, index) => index + 1).map((p) => (
                 <button
                   key={p}
                   onClick={() => setPage(p)}
@@ -298,7 +358,9 @@ export default function PanelsPage() {
                 </button>
               ))}
               <button
-                onClick={() => setPage(Math.min(4, page + 1))}
+                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                disabled={page === totalPages}
+                aria-label="Next page"
                 className="p-2 rounded-xl bg-[#121824] border border-[#1e293b] text-slate-400 hover:text-white transition-colors"
               >
                 <ChevronRight className="w-4 h-4" />

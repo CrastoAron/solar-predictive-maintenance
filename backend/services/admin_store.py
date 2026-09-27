@@ -173,7 +173,7 @@ class AdminStore:
         if not arr:
             arr = next((a for a in self._arrays if a["customer_id"] == customer_id), None)
         if not arr:
-            arr = self.create_array(customer_id, rows=1, cols=1, name="Main Array")
+            arr = self.create_array(customer_id, name="Main Array")
         arr_id = arr["id"]
 
         panel_id = str(uuid.uuid4())
@@ -191,10 +191,6 @@ class AdminStore:
             "array_id": arr_id,
             "name": payload.get("name") or f"Solar Panel #{len([p for p in self._panels if p.get('array_id') == arr_id]) + 1}",
             "esp32_id": payload.get("esp32_id") or f"esp32-0{len(self._panels) + 1}",
-            "cell_rows": max(1, int(payload.get("cell_rows") or 3)),
-            "cell_cols": max(1, int(payload.get("cell_cols") or 4)),
-            "row_index": 0,
-            "col_index": len(self._panels),
             "panel_width_mm": payload.get("panel_width_mm") or 1650,
             "panel_height_mm": payload.get("panel_height_mm") or 992,
             "rated_voltage": v if v is not None else 38.5,
@@ -215,15 +211,13 @@ class AdminStore:
         self._panels.append(new_panel)
         return deepcopy(new_panel)
 
-    def create_array(self, customer_id: str, rows: int, cols: int, name: str = "Main Array") -> dict[str, Any]:
+    def create_array(self, customer_id: str, name: str = "Main Array") -> dict[str, Any]:
         client = supabase_client.get_client()
         new_id = str(uuid.uuid4())
         record = {
             "id": new_id,
             "customer_id": customer_id,
             "name": name or "Main Array",
-            "rows": max(1, rows),
-            "cols": max(1, cols),
         }
 
         if client:
@@ -238,42 +232,6 @@ class AdminStore:
 
         self._arrays.append(record)
         return deepcopy(record)
-
-    def bulk_create_panels(self, array_id: str, rows: int, cols: int) -> list[dict[str, Any]]:
-        """Create a grid of unassigned panels for an existing array."""
-        panels = [
-            {
-                "id": str(uuid.uuid4()),
-                "array_id": array_id,
-                "name": f"Solar Panel {row_index + 1}-{col_index + 1}",
-                "esp32_id": "",
-                "cell_rows": 3,
-                "cell_cols": 4,
-                "row_index": row_index,
-                "col_index": col_index,
-                "panel_width_mm": None,
-                "panel_height_mm": None,
-                "rated_voltage": None,
-                "rated_current": None,
-                "rated_power": None,
-            }
-            for row_index in range(rows)
-            for col_index in range(cols)
-        ]
-
-        client = supabase_client.get_client()
-        if client:
-            try:
-                res = client.table("panels").insert(panels).execute()
-                if res and res.data:
-                    return res.data
-            except Exception as err:
-                raise RuntimeError(f"Unable to create panels in Supabase: {err}") from err
-
-            raise RuntimeError("Supabase did not return the created panels")
-
-        self._panels.extend(panels)
-        return deepcopy(panels)
 
     def update_panel(self, panel_id: str, customer_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
         client = supabase_client.get_client()
@@ -360,7 +318,7 @@ class AdminStore:
                 customer = client.table("customers").select("id").eq("firebase_uid", firebase_uid).limit(1).execute()
                 if not customer or not customer.data:
                     return []
-                arrays = client.table("panel_arrays").select("id,name,rows,cols").eq("customer_id", customer.data[0]["id"]).execute()
+                arrays = client.table("panel_arrays").select("id,name").eq("customer_id", customer.data[0]["id"]).execute()
                 customer_arrays = arrays.data or []
                 array_ids = [item["id"] for item in customer_arrays]
                 if not array_ids:
@@ -373,8 +331,6 @@ class AdminStore:
                         "setup": {
                             "id": panel["array_id"],
                             "name": arrays_by_id[panel["array_id"]].get("name"),
-                            "rows": arrays_by_id[panel["array_id"]].get("rows"),
-                            "cols": arrays_by_id[panel["array_id"]].get("cols"),
                         },
                     }
                     for panel in (panels.data or [])
@@ -395,8 +351,6 @@ class AdminStore:
                 "setup": {
                     "id": panel["array_id"],
                     "name": customer_arrays[panel["array_id"]].get("name"),
-                    "rows": customer_arrays[panel["array_id"]].get("rows"),
-                    "cols": customer_arrays[panel["array_id"]].get("cols"),
                 },
             }
             for panel in self._panels

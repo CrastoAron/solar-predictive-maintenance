@@ -6,7 +6,6 @@ import Link from "next/link";
 import {
   ArrowLeft,
   Plus,
-  Grid,
   Cpu,
   Zap,
   Save,
@@ -26,10 +25,6 @@ interface PanelConfig {
   id: string;
   name?: string;
   esp32_id: string;
-  cell_rows?: number;
-  cell_cols?: number;
-  row_index?: number;
-  col_index?: number;
   rated_voltage: number | null;
   rated_current: number | null;
   rated_power: number | null;
@@ -60,8 +55,6 @@ export default function CustomerConfigPage() {
   const [isAddPanelModalOpen, setIsAddPanelModalOpen] = useState(false);
   const [newPanelName, setNewPanelName] = useState("");
   const [newEsp32Id, setNewEsp32Id] = useState("");
-  const [newCellRows, setNewCellRows] = useState(3);
-  const [newCellCols, setNewCellCols] = useState(4);
   const [newRatedVoltage, setNewRatedVoltage] = useState(38.5);
   const [newRatedCurrent, setNewRatedCurrent] = useState(9.8);
   const [addingPanel, setAddingPanel] = useState(false);
@@ -138,8 +131,6 @@ export default function CustomerConfigPage() {
           body: JSON.stringify({
             name: newPanelName.trim() || `Solar Panel #${panels.length + 1}`,
             esp32_id: newEsp32Id.trim() || `esp32-0${panels.length + 1}`,
-            cell_rows: newCellRows,
-            cell_cols: newCellCols,
             rated_voltage: newRatedVoltage,
             rated_current: newRatedCurrent,
           }),
@@ -181,8 +172,6 @@ export default function CustomerConfigPage() {
           body: JSON.stringify({
             name: selectedPanel.name,
             esp32_id: selectedPanel.esp32_id || "",
-            cell_rows: selectedPanel.cell_rows,
-            cell_cols: selectedPanel.cell_cols,
             rated_voltage: selectedPanel.rated_voltage ? Number(selectedPanel.rated_voltage) : null,
             rated_current: selectedPanel.rated_current ? Number(selectedPanel.rated_current) : null,
             panel_width_mm: selectedPanel.panel_width_mm ? Number(selectedPanel.panel_width_mm) : null,
@@ -364,7 +353,7 @@ export default function CustomerConfigPage() {
                   <Layers className="h-5 w-5 text-orange-500" />
                   Physical Solar Panels Setup
                 </h3>
-                <p className="text-xs text-slate-400">Select a panel to inspect its ESP32 ID and solar cell matrix layout</p>
+                <p className="text-xs text-slate-400">Select a panel to inspect its logger mapping and rated specifications</p>
               </div>
               <button
                 onClick={() => setIsAddPanelModalOpen(true)}
@@ -391,9 +380,6 @@ export default function CustomerConfigPage() {
               <div className="grid gap-4 sm:grid-cols-2">
                 {panels.map((panel, idx) => {
                   const isSelected = selectedPanel?.id === panel.id;
-                  const cRows = panel.cell_rows || 3;
-                  const cCols = panel.cell_cols || 4;
-
                   return (
                     <div
                       key={panel.id}
@@ -429,12 +415,7 @@ export default function CustomerConfigPage() {
                         <span className="text-[10px] text-slate-400 font-sans">1:1 IoT Logger</span>
                       </div>
 
-                      {/* Solar Cell Grid Spec */}
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div className="rounded-lg bg-slate-900/50 p-2 border border-slate-800">
-                          <p className="text-[10px] text-slate-400">Cell Matrix</p>
-                          <p className="font-mono font-bold text-slate-200">{cRows} × {cCols} ({cRows * cCols} cells)</p>
-                        </div>
+                      <div className="grid grid-cols-1 gap-2 text-xs">
                         <div className="rounded-lg bg-slate-900/50 p-2 border border-slate-800">
                           <p className="text-[10px] text-slate-400">Rated Power</p>
                           <p className="font-mono font-bold text-orange-400">{panel.rated_power ? `${panel.rated_power} W` : "---"}</p>
@@ -452,7 +433,7 @@ export default function CustomerConfigPage() {
             )}
           </div>
 
-          {/* Right Column: Panel Detail Inspector & Cell Matrix Diagram */}
+          {/* Right Column: Panel Detail Inspector */}
           <div className="space-y-6">
             {selectedPanel ? (
               <div className="rounded-3xl border border-slate-800 bg-slate-900/60 p-6 backdrop-blur-xl space-y-6">
@@ -460,7 +441,7 @@ export default function CustomerConfigPage() {
                   <div>
                     <h3 className="text-base font-bold text-white flex items-center gap-2">
                       <Cpu className="h-4 w-4 text-orange-500" />
-                      Panel & Solar Cell Inspector
+                      Panel Inspector
                     </h3>
                     <p className="text-xs font-mono text-slate-400">ID: {selectedPanel.id}</p>
                   </div>
@@ -490,71 +471,6 @@ export default function CustomerConfigPage() {
                         onChange={(e) => setSelectedPanel({ ...selectedPanel, esp32_id: e.target.value })}
                         className="w-full rounded-xl border border-slate-800 bg-slate-950 py-2 left-10 pl-10 pr-3 text-sm font-mono text-emerald-400 placeholder-slate-600 focus:border-orange-500 focus:outline-none"
                       />
-                    </div>
-                  </div>
-
-                  {/* Solar Cell Count Matrix Inputs */}
-                  <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-3">
-                    <p className="font-bold text-slate-200 flex items-center gap-2">
-                      <Grid className="h-4 w-4 text-orange-500" />
-                      Internal Solar Cells Matrix Layout
-                    </p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[11px] text-slate-400 mb-1">Cell Rows</label>
-                        <input
-                          type="number"
-                          min="1"
-                          max="30"
-                          value={selectedPanel.cell_rows || 3}
-                          onChange={(e) =>
-                            setSelectedPanel({
-                              ...selectedPanel,
-                              cell_rows: Math.max(1, Number(e.target.value)),
-                            })
-                          }
-                          className="w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] text-slate-400 mb-1">Cell Columns</label>
-                        <input
-                          type="number"
-                          min="1"
-                          max="30"
-                          value={selectedPanel.cell_cols || 4}
-                          onChange={(e) =>
-                            setSelectedPanel({
-                              ...selectedPanel,
-                              cell_cols: Math.max(1, Number(e.target.value)),
-                            })
-                          }
-                          className="w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Solar Cell Matrix Diagram */}
-                    <div className="pt-2">
-                      <p className="text-[11px] text-slate-400 mb-2">
-                        Visual Cell Layout Diagram ({(selectedPanel.cell_rows || 3) * (selectedPanel.cell_cols || 4)} Cells inside this Panel):
-                      </p>
-                      <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-3 overflow-x-auto">
-                        <div className="flex flex-col gap-1.5 min-w-max items-center justify-center">
-                          {Array.from({ length: selectedPanel.cell_rows || 3 }, (_, r) => (
-                            <div key={r} className="flex gap-1.5">
-                              {Array.from({ length: selectedPanel.cell_cols || 4 }, (_, c) => (
-                                <div
-                                  key={`${r}-${c}`}
-                                  className="h-7 w-9 rounded-md border border-orange-500/30 bg-gradient-to-br from-blue-900/40 to-slate-900/80 flex items-center justify-center text-[9px] font-mono text-orange-300"
-                                >
-                                  C{r + 1}.{c + 1}
-                                </div>
-                              ))}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
                     </div>
                   </div>
 
@@ -675,29 +591,6 @@ export default function CustomerConfigPage() {
                   onChange={(e) => setNewEsp32Id(e.target.value)}
                   className="w-full rounded-xl border border-slate-800 bg-slate-900 px-3.5 py-2.5 text-sm font-mono text-emerald-400 focus:border-orange-500 focus:outline-none"
                 />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-400 mb-1">Cell Rows</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={newCellRows}
-                    onChange={(e) => setNewCellRows(Number(e.target.value))}
-                    className="w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-400 mb-1">Cell Columns</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={newCellCols}
-                    onChange={(e) => setNewCellCols(Number(e.target.value))}
-                    className="w-full rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none"
-                  />
-                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">

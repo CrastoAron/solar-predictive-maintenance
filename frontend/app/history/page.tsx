@@ -117,7 +117,7 @@ export default function HistoryPage() {
 
           <div className="flex flex-wrap items-center gap-3">
             {/* Scope Filter */}
-            <select
+            {/* <select
               value={scope}
               onChange={(e) => setScope(e.target.value)}
               className="bg-[#121824] border border-[#1e293b] text-slate-200 rounded-xl px-3.5 py-2 text-xs font-medium focus:outline-none"
@@ -125,18 +125,8 @@ export default function HistoryPage() {
               <option value="Entire Installation">Entire Installation</option>
               <option value="Array A">Array A</option>
               <option value="Array B">Array B</option>
-            </select>
+            </select> */}
 
-            {/* Time Filter */}
-            <select
-              value={timeRange}
-              onChange={(e) => setTimeRange(e.target.value)}
-              className="bg-[#121824] border border-[#1e293b] text-slate-200 rounded-xl px-3.5 py-2 text-xs font-medium focus:outline-none"
-            >
-              <option value="Last 30 days">Last 30 days</option>
-              <option value="Last 90 days">Last 90 days</option>
-              <option value="Last 1 year">Last 1 year</option>
-            </select>
 
             <button
               onClick={exportCSV}
@@ -254,9 +244,6 @@ export default function HistoryPage() {
 
               {(historyError || serviceError) && <p className="text-xs text-amber-400">{serviceError || historyError}</p>}
 
-              <button disabled className="px-4 py-2 rounded-xl bg-sky-600/40 text-white/50 text-xs font-semibold flex items-center gap-2 self-start sm:self-auto cursor-not-allowed" title="Service records are not available from the backend">
-                <Plus className="w-4 h-4" /> Add Service
-              </button>
             </div>
 
             {/* Service History Table */}
@@ -292,9 +279,6 @@ export default function HistoryPage() {
                     <th className="px-6 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-wider">
                         Notes
                     </th>
-                    <th className="px-6 py-3.5 text-xs font-semibold text-slate-400 uppercase tracking-wider text-right">
-                      Actions
-                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#1e293b]/60 text-xs">
@@ -320,11 +304,6 @@ export default function HistoryPage() {
                       </td>
                       <td className="px-6 py-4 text-slate-400">
                         {record.description || record.task_type}
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <button className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors">
-                          <MoreHorizontal className="w-4 h-4" />
-                        </button>
                       </td>
                     </tr>
                   ))}

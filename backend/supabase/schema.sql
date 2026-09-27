@@ -22,11 +22,13 @@ create table if not exists public.panel_arrays (
   id uuid primary key,
   customer_id uuid not null references public.customers(id) on delete cascade,
   name text not null default 'Main Array',
-  rows integer not null default 1 check (rows > 0),
-  cols integer not null default 1 check (cols > 0),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.panel_arrays
+  drop column if exists rows,
+  drop column if exists cols;
 
 create index if not exists panel_arrays_customer_id_idx
   on public.panel_arrays(customer_id);
@@ -36,10 +38,6 @@ create table if not exists public.panels (
   array_id uuid not null references public.panel_arrays(id) on delete cascade,
   name text not null,
   esp32_id text not null default '',
-  cell_rows integer not null default 3 check (cell_rows > 0),
-  cell_cols integer not null default 4 check (cell_cols > 0),
-  row_index integer not null default 0 check (row_index >= 0),
-  col_index integer not null default 0 check (col_index >= 0),
   panel_width_mm integer check (panel_width_mm > 0),
   panel_height_mm integer check (panel_height_mm > 0),
   rated_voltage numeric check (rated_voltage > 0),
@@ -48,6 +46,12 @@ create table if not exists public.panels (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.panels
+  drop column if exists cell_rows,
+  drop column if exists cell_cols,
+  drop column if exists row_index,
+  drop column if exists col_index;
 
 create index if not exists panels_esp32_id_idx on public.panels(esp32_id);
 create unique index if not exists panels_esp32_id_unique_idx

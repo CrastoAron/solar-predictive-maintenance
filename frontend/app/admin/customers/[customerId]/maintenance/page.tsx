@@ -39,6 +39,18 @@ interface CustomerDetail {
   panels?: PanelConfig[];
 }
 
+interface CustomerAlert {
+  id: string;
+  panel_id: string;
+  panel_name: string;
+  esp32_id: string;
+  type: string;
+  severity: string;
+  message: string;
+  timestamp: string;
+  resolved: boolean;
+}
+
 interface MaintenanceTask {
   id: string;
   customer_id: string;
@@ -91,6 +103,7 @@ export default function CustomerMaintenancePage() {
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);
   const [panels, setPanels] = useState<PanelConfig[]>([]);
   const [tasks, setTasks] = useState<MaintenanceTask[]>([]);
+  const [alerts, setAlerts] = useState<CustomerAlert[]>([]);
   const [selectedTask, setSelectedTask] = useState<MaintenanceTask | null>(null);
 
   // Filters
@@ -151,11 +164,14 @@ export default function CustomerMaintenancePage() {
     }
     setFetching(true);
     try {
-      const [custRes, taskRes] = await Promise.all([
+      const [custRes, taskRes, alertRes] = await Promise.all([
         fetch(`${API_BASE}/admin/customers/${params.customerId}`, {
           headers: apiHeaders(token),
         }),
         fetch(`${API_BASE}/admin/customers/${params.customerId}/maintenance`, {
+          headers: apiHeaders(token),
+        }),
+        fetch(`${API_BASE}/admin/customers/${params.customerId}/alerts`, {
           headers: apiHeaders(token),
         }),
       ]);
@@ -171,6 +187,13 @@ export default function CustomerMaintenancePage() {
       const taskData = await taskRes.json();
       if (taskData) {
         setTasks(taskData.tasks || []);
+      }
+      if (alertRes.ok) {
+        const alertData = await alertRes.json();
+        setAlerts(alertData.alerts || []);
+      } else {
+        setAlerts([]);
+        console.error("Unable to load customer alerts:", alertRes.status);
       }
     } catch (err) {
       console.error("Error loading data:", err);
@@ -493,6 +516,43 @@ export default function CustomerMaintenancePage() {
             <CheckCircle2 className="h-5 w-5 flex-shrink-0" />
             {toastMessage}
           </div>
+        )}
+
+        {alerts.length > 0 && (
+          <section className="rounded-2xl border border-amber-500/25 bg-slate-900/60 p-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h2 className="flex items-center gap-2 text-sm font-bold text-white">
+                <AlertTriangle className="h-4 w-4 text-amber-400" />
+                System Alerts
+              </h2>
+              <span className="text-xs text-slate-400">{alerts.length} latest alerts for this customer</span>
+            </div>
+            <div className="divide-y divide-slate-800">
+              {alerts.map((alert) => (
+                <div key={alert.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-100">{alert.message}</p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      {alert.panel_name} · {alert.type} · {new Date(alert.timestamp).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold capitalize ${
+                      alert.resolved
+                        ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
+                        : alert.severity === "high"
+                          ? "border-red-500/25 bg-red-500/10 text-red-400"
+                          : alert.severity === "medium"
+                            ? "border-amber-500/25 bg-amber-500/10 text-amber-400"
+                            : "border-sky-500/25 bg-sky-500/10 text-sky-400"
+                    }`}>
+                      {alert.resolved ? "Resolved" : alert.severity}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
         )}
 
         {/* Stat Cards */}
