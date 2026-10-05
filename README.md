@@ -12,6 +12,10 @@ ESP32 firmware → MQTT or HTTPS → FastAPI → InfluxDB
                                       └→ Next.js dashboard and admin tools
 ```
 
+## Circuit diagram
+
+![SolarPanel Logger circuit diagram](assets/SolarPanel-Logger.png)
+
 ## Active monitoring approach
 
 The project uses an expected-power baseline, not a supervised physical-fault

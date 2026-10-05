@@ -234,7 +234,7 @@ export default function TrendsPage() {
               <MetricCard
                 label="Average Daily"
                 value={String(stats.avgDaily)}
-                unit="Wh/day"
+                unit="/day"
                 icon={<CalendarIcon className="w-5 h-5" />}
                 color="amber"
                 trend="↑ 8%"
