@@ -65,7 +65,7 @@ def parse_args() -> argparse.Namespace:
         type=endpoint_url,
         help="ngrok base URL or full /api/telemetry URL",
     )
-    parser.add_argument("--device-id", default="esp32-01")
+    parser.add_argument("--device-id", default="esp32-4")
     parser.add_argument("--interval", type=float, default=2.0, help="Seconds between requests (default: 2)")
     parser.add_argument("--count", type=int, default=0, help="Requests to send (0 runs forever)")
     parser.add_argument("--timeout", type=float, default=10.0, help="HTTP timeout in seconds (default: 10)")
