@@ -5,7 +5,7 @@ from services.firebase_admin import verify_firebase_token
 from services.supabase_client import verify_supabase_token
 
 
-async def get_current_user(
+def get_current_user(
     authorization: str | None = Header(default=None),
 ) -> dict:
     if not authorization or not authorization.startswith("Bearer "):
@@ -25,7 +25,7 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
     raise HTTPException(status_code=410, detail="Firebase admin authentication has been replaced")
 
 
-async def require_supabase_admin(
+def require_supabase_admin(
     authorization: str | None = Header(default=None),
 ) -> dict:
     if not authorization or not authorization.startswith("Bearer "):

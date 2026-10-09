@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from starlette.concurrency import run_in_threadpool
 from apscheduler.triggers.interval import IntervalTrigger
 
 from config import (
@@ -115,6 +116,9 @@ class PredictionScheduler:
             await self._run_prediction_batch(device_id)
 
     async def _run_prediction_batch(self, device_id: str) -> None:
+        await run_in_threadpool(self._run_prediction_batch_sync, device_id)
+
+    def _run_prediction_batch_sync(self, device_id: str) -> None:
         try:
             if not self._expected_power_runner.is_ready():
                 logger.warning("Skipping prediction batch because expected-power assets are not ready.")

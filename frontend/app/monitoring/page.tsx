@@ -73,6 +73,7 @@ export default function MonitoringPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+  const requestInFlightRef = useRef(false);
 
   useEffect(() => {
     if (!user) router.replace("/login");
@@ -95,39 +96,59 @@ export default function MonitoringPage() {
   }, [user]);
 
   const fetchMonitoringData = useCallback(async () => {
-    if (panelsLoading || panels.length === 0 || !selectedPanel) return;
+    if (panelsLoading || panels.length === 0 || !selectedPanel || requestInFlightRef.current) return false;
+    requestInFlightRef.current = true;
+    const requestId = ++requestIdRef.current;
     try {
-      const requestId = ++requestIdRef.current;
       const panel = panels.find((candidate) => candidate.name === selectedPanel);
       if (!panel?.esp32_id) {
         setConnectionStatus("offline");
         setError("The selected panel has no telemetry device assigned.");
-        return;
+        return false;
       }
       const deviceId = panel.esp32_id;
-      const [liveData, hwData, expectedPowerData] = await Promise.all([
-        getLive(deviceId),
-        getHardwareStatus(deviceId),
-        getExpectedPower(deviceId),
-      ]);
-      if (requestId !== requestIdRef.current) return;
-      if (liveData) setLive(liveData);
-      if (hwData) setHardware(hwData);
-      setExpectedPower(expectedPowerData);
-      if (liveData) {
-        const value = selectedParam === "Voltage (V)" ? liveData.voltage : selectedParam === "Current (A)" ? liveData.current : selectedParam === "Irradiance (lux)" ? liveData.lux : liveData.power;
-        setLiveHistory((points) => [...points, { timestamp: liveData.timestamp, value }].slice(-LIVE_POINT_LIMIT));
+      const requests = [
+        getLive(deviceId).then((liveData) => {
+          if (requestId !== requestIdRef.current) return;
+          setLive(liveData);
+          if (liveData) {
+            const value = selectedParam === "Voltage (V)" ? liveData.voltage : selectedParam === "Current (A)" ? liveData.current : selectedParam === "Irradiance (lux)" ? liveData.lux : liveData.power;
+            setLiveHistory((points) => [...points, { timestamp: liveData.timestamp, value }].slice(-LIVE_POINT_LIMIT));
+          }
+        }),
+        getHardwareStatus(deviceId).then((hardwareData) => {
+          if (requestId === requestIdRef.current) setHardware(hardwareData);
+        }),
+        getExpectedPower(deviceId).then((expectedPowerData) => {
+          if (requestId === requestIdRef.current) setExpectedPower(expectedPowerData);
+        }),
+      ];
+      const results = await Promise.allSettled(requests);
+      if (requestId !== requestIdRef.current) return false;
+      const failures = results.filter((result) => result.status === "rejected");
+      const succeeded = results.length - failures.length;
+      if (succeeded > 0) {
+        setConnectionStatus("live");
+        setError(failures.length > 0 ? "Some monitoring data could not be loaded." : null);
+        return true;
       }
-      setConnectionStatus("live");
-      setError(null);
+      const reason = failures[0]?.status === "rejected" ? failures[0].reason : null;
+      setConnectionStatus("offline");
+      setError(reason instanceof Error ? reason.message : "Failed to fetch monitoring data.");
+      return false;
     } catch (e) {
       console.error("Monitoring request failed:", e);
       setConnectionStatus("offline");
       setError(e instanceof Error ? e.message : "Failed to fetch monitoring data.");
+      return false;
+    } finally {
+      if (requestId === requestIdRef.current) requestInFlightRef.current = false;
     }
   }, [panels, panelsLoading, selectedPanel, selectedParam, setConnectionStatus]);
 
   useEffect(() => {
+    requestIdRef.current += 1;
+    requestInFlightRef.current = false;
     setLiveHistory([]);
   }, [selectedParam, selectedPanel]);
 
@@ -140,9 +161,9 @@ export default function MonitoringPage() {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchMonitoringData();
+    const refreshed = await fetchMonitoringData();
     setRefreshing(false);
-    addToast("success", "Monitoring data refreshed.");
+    if (refreshed) addToast("success", "Monitoring data refreshed.");
   };
 
   const vVal = live?.voltage;

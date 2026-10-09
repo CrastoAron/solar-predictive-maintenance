@@ -1,5 +1,3 @@
-import asyncio
-
 import routers.alerts as alerts_router
 
 
@@ -31,11 +29,9 @@ def test_customer_alerts_include_every_assigned_panel(monkeypatch):
     monkeypatch.setattr(alerts_router, "admin_store", FakeAdminStore())
     monkeypatch.setattr(alerts_router, "get_influx_client", FakeInfluxClient)
 
-    response = asyncio.run(
-        alerts_router.get_alerts(
-            device_id=None,
-            user={"uid": "customer-1", "role": "customer"},
-        )
+    response = alerts_router.get_alerts(
+        device_id=None,
+        user={"uid": "customer-1", "role": "customer"},
     )
 
     assert len(response.alerts) == 2

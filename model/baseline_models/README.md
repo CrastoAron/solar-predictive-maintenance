@@ -15,6 +15,7 @@ It is not a multi-class fault classifier or a maintenance-days forecast.
 | `expected_power_metrics.json` | Held-out metrics and documented limitations. |
 | `expected_power_test_predictions.csv` | Actual versus expected values for the test period. |
 | `expected_power_actual_vs_expected.png` | Presentation chart for the chronological test period. |
+| `expected_power_validation.png` | Held-out measured-versus-expected power and residual plots. |
 
 ## Inputs and output
 
@@ -48,3 +49,7 @@ The artifacts estimate expected daytime output only. Underperformance can come
 from shading, soiling, weather, wiring, sensor error, or other conditions. The
 diagnostics service must provide the supporting evidence and should report a
 low-output anomaly when no physical cause is confirmed.
+
+The source data has no verified fault labels, so the training script does not
+generate a fault ROC curve. `expected_power_validation.png` evaluates the
+regression model against measured power on the chronological held-out period.

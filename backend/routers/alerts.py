@@ -9,7 +9,7 @@ router = APIRouter()
 
 
 @router.get("/api/alerts", response_model=AlertsResponse)
-async def get_alerts(
+def get_alerts(
     device_id: str | None = Query(default=None),
     user: dict = Depends(get_current_user),
 ):

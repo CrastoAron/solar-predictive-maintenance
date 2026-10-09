@@ -70,6 +70,23 @@ a prediction column. A compatible joblib model can be used deliberately with
 `--model` and, if needed, `--feature-order`; the script never loads a model by
 default.
 
+An ROC curve PDF can be generated only when the selected dataset contains an
+independent binary ground-truth label and a continuous score. Scores must
+increase with confidence in the positive class; use `--roc-positive-label` when
+the positive class is not `1`:
+
+```bash
+backend/.venv/bin/python model/solar_analysis.py \
+  --roc-label fault_label --roc-score anomaly_score \
+  --roc-positive-label fault
+```
+
+The curve is saved as `roc_curve.pdf` in the output directory. The bundled
+cleaned telemetry contains no verified fault labels, so ROC generation is
+skipped for it. The training script instead saves a held-out regression report
+to `baseline_models/expected_power_validation.png`, comparing predicted power
+with measured power.
+
 ## Limitations
 
 - The model does not identify a verified physical fault cause.

@@ -25,7 +25,7 @@ def _parse_query_dt(value: str) -> datetime:
 
 
 @router.get("/api/history", response_model=HistoryResponse)
-async def get_history(
+def get_history(
     field: str = Query(...),
     start: str | None = Query(default=None),
     end: str | None = Query(default=None),

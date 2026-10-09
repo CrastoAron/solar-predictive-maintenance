@@ -1,4 +1,4 @@
-Selected dataset: /home/aron/Projects/solar-predictive-maintenance/model/cleaned_data/cleaned_real_telemetry.csv
+Selected dataset: /home/ak/Projects/solar-predictive-maintenance/model/cleaned_data/cleaned_real_telemetry.csv
 Rows: 2477
 Columns: 10
 
@@ -60,6 +60,7 @@ Generated graphs:
 - irradiance_vs_temperature.png
 - power_distribution.png
 - correlation_heatmap.png
+- roc_curve.pdf
 
 Correlation matrix:
                   lux  temperature   voltage   current     power

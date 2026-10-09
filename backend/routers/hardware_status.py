@@ -9,7 +9,7 @@ router = APIRouter()
 
 
 @router.get("/api/hardware-status", response_model=HardwareStatusResponse | None)
-async def get_hardware_status(
+def get_hardware_status(
     device_id: str | None = Query(default=None),
     user: dict = Depends(get_current_user),
 ):

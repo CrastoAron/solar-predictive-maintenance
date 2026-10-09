@@ -8,7 +8,7 @@ router = APIRouter()
 
 
 @router.get("/api/predictions", response_model=PredictionsResponse | None)
-async def get_predictions(
+def get_predictions(
     device_id: str | None = Query(default=None),
     user: dict = Depends(get_current_user),
 ):

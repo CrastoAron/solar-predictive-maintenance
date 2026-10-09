@@ -552,6 +552,76 @@ def plot_actual_vs_predicted(frame: pd.DataFrame, mapping: ColumnMapping, output
     return True, {"mae": mae, "rmse": rmse, "r2": r2}
 
 
+def plot_roc_curve(
+    frame: pd.DataFrame,
+    label_column: str | None,
+    score_column: str | None,
+    positive_label: str | None,
+    output: Path,
+) -> bool:
+    """Save an ROC PDF only when independent binary labels and scores exist."""
+    if label_column is None or score_column is None:
+        print("[SKIPPED] ROC Curve — provide independent binary labels and continuous scores.")
+        return False
+    if label_column not in frame.columns or score_column not in frame.columns:
+        missing = [column for column in (label_column, score_column) if column not in frame.columns]
+        print(f"[SKIPPED] ROC Curve — column(s) not found: {', '.join(missing)}")
+        return False
+
+    data = frame[[label_column, score_column]].copy()
+
+    data[score_column] = pd.to_numeric(data[score_column], errors="coerce")
+    data = data.replace([np.inf, -np.inf], np.nan).dropna()
+    classes = data[label_column].drop_duplicates().tolist()
+    if len(classes) != 2:
+        print("[SKIPPED] ROC Curve — the selected label column must contain exactly two classes with valid scores.")
+        return False
+
+    if positive_label is None:
+        positive_matches = [value for value in classes if value == 1 or str(value) == "1"]
+        if len(positive_matches) != 1:
+            print("[SKIPPED] ROC Curve — specify --roc-positive-label for the positive class.")
+            return False
+        positive_value = positive_matches[0]
+    else:
+        positive_matches = [value for value in classes if str(value) == positive_label]
+        if not positive_matches and pd.api.types.is_numeric_dtype(data[label_column]):
+            numeric_positive = pd.to_numeric(positive_label, errors="coerce")
+            positive_matches = [value for value in classes if value == numeric_positive]
+        if len(positive_matches) != 1:
+            print(f"[SKIPPED] ROC Curve — positive label '{positive_label}' is not present in {label_column}.")
+            return False
+        positive_value = positive_matches[0]
+
+    y_true = (data[label_column] == positive_value).astype(int)
+    if y_true.nunique() != 2:
+        print("[SKIPPED] ROC Curve — both positive and negative examples are required.")
+        return False
+
+    try:
+        from sklearn.metrics import auc, roc_curve
+    except ImportError as error:
+        print(f"[SKIPPED] ROC Curve — scikit-learn is unavailable ({error}).")
+        return False
+
+    false_positive_rate, true_positive_rate, _ = roc_curve(y_true, data[score_column])
+    figure, axis = plt.subplots(figsize=(7, 6))
+    area = float(auc(false_positive_rate, true_positive_rate))
+    axis.plot(false_positive_rate, true_positive_rate, color="#2563eb", linewidth=2, label=f"ROC (AUC = {area:.3f})")
+    axis.set_title("Receiver Operating Characteristic")
+    axis.plot([0, 1], [0, 1], "--", color="#6b7280", linewidth=1.5, label="Random classifier")
+    axis.set(
+        xlabel="False Positive Rate",
+        ylabel="True Positive Rate",
+        xlim=(0, 1),
+        ylim=(0, 1.02),
+    )
+    axis.legend(loc="lower right")
+    axis.grid(alpha=0.3)
+    save_figure(figure, output / "roc_curve.pdf")
+    return True
+
+
 def write_summary(
     output: Path,
     inspection: str,
@@ -578,6 +648,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=None, help="Directory for PNG graphs and summaries (default: model/graphs for the bundled dataset; otherwise <dataset_path>/graphs)")
     parser.add_argument("--model", type=Path, default=None, help="Optional compatible joblib model used to create a predicted-power column.")
     parser.add_argument("--feature-order", type=Path, default=None, help="Optional JSON file containing {'feature_order': [...]} for --model.")
+    parser.add_argument("--roc-label", default=None, help="Binary ground-truth label column for an optional ROC curve.")
+    parser.add_argument("--roc-score", default=None, help="Continuous prediction/anomaly score column; larger values indicate the positive class.")
+    parser.add_argument("--roc-positive-label", default=None, help="Positive class value in --roc-label (defaults to 1 when present).")
     return parser.parse_args()
 
 
@@ -627,6 +700,14 @@ def main() -> int:
     predictions_created, prediction_metrics = plot_actual_vs_predicted(cleaned, mapping, output)
     if predictions_created:
         generated.append("actual_vs_predicted_power.png")
+    if plot_roc_curve(
+        cleaned,
+        args.roc_label,
+        args.roc_score,
+        args.roc_positive_label,
+        output,
+    ):
+        generated.append("roc_curve.pdf")
     write_summary(output, inspection, notes, generated, correlation, prediction_metrics)
     print(f"[DONE] Analysis artifacts saved to: {output}")
     return 0

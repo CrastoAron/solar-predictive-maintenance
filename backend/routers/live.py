@@ -9,7 +9,7 @@ router = APIRouter()
 
 
 @router.get("/api/live", response_model=LiveResponse | None)
-async def get_live(
+def get_live(
     response: Response,
     device_id: str | None = Query(default=None),
     user: dict = Depends(get_current_user),

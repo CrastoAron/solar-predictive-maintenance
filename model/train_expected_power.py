@@ -26,6 +26,8 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 RANDOM_STATE = 42
 DAYLIGHT_LUX_MIN = 5_000.0
 EXPECTED_POWER_FLOOR_W = 0.10
+NORMAL_RATIO_MIN = 0.80
+UNDERPERFORMING_RATIO_MIN = 0.50
 
 BASE_DIR = Path(__file__).resolve().parent
 INPUT_PATH = BASE_DIR / "cleaned_data" / "cleaned_real_telemetry.csv"
@@ -51,11 +53,52 @@ def classify_performance(actual: pd.Series, expected: np.ndarray) -> tuple[np.nd
     safe_expected = np.maximum(expected, EXPECTED_POWER_FLOOR_W)
     ratio = actual.to_numpy() / safe_expected
     status = np.select(
-        [ratio >= 0.80, ratio >= 0.50],
+        [ratio >= NORMAL_RATIO_MIN, ratio >= UNDERPERFORMING_RATIO_MIN],
         ["Normal", "Underperforming"],
         default="Strong anomaly",
     )
     return ratio, status
+
+
+def save_regression_validation_figure(predictions: pd.DataFrame, metrics: dict[str, float], output_path: Path) -> None:
+    """Compare held-out power predictions with measured targets and residuals."""
+    actual = predictions["actual_power"].to_numpy()
+    expected = predictions["expected_power"].to_numpy()
+    residual = actual - expected
+    lower = min(float(actual.min()), float(expected.min()))
+    upper = max(float(actual.max()), float(expected.max()))
+
+    figure, (parity_axis, residual_axis) = plt.subplots(1, 2, figsize=(12, 5.5))
+    parity_axis.scatter(actual, expected, alpha=0.7, s=24, color="#2563eb", edgecolors="none")
+    parity_axis.plot([lower, upper], [lower, upper], "--", color="#dc2626", linewidth=1.5, label="Ideal: y = x")
+    parity_axis.set(
+        title="Measured vs Expected Power",
+        xlabel="Measured power (W)",
+        ylabel="Expected power (W)",
+    )
+    parity_axis.legend()
+    parity_axis.grid(alpha=0.3)
+
+    residual_axis.scatter(expected, residual, alpha=0.7, s=24, color="#0f766e", edgecolors="none")
+    residual_axis.axhline(0, color="#dc2626", linestyle="--", linewidth=1.5)
+    residual_axis.set(
+        title="Held-Out Prediction Residuals",
+        xlabel="Expected power (W)",
+        ylabel="Measured - expected (W)",
+    )
+    residual_axis.grid(alpha=0.3)
+
+    figure.suptitle(
+        "Chronological Holdout Validation | "
+        f"MAE {metrics['mae_watts']:.3f} W | "
+        f"RMSE {metrics['rmse_watts']:.3f} W | "
+        f"R² {metrics['r2']:.3f}"
+    )
+    figure.text(0.5, 0.01, "Daylight test rows; measured power is the held-out regression target, not a fault label.", ha="center", fontsize=8)
+    figure.tight_layout(rect=(0, 0.05, 1, 0.92))
+    figure.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close(figure)
+    print(f"Saved regression validation report to {output_path}")
 
 
 def main() -> None:
@@ -126,6 +169,7 @@ def main() -> None:
     predictions["performance_ratio"] = ratio
     predictions["operational_status"] = operational_status
     predictions.to_csv(OUTPUT_DIR / "expected_power_test_predictions.csv", index=False, float_format="%.6f")
+    save_regression_validation_figure(predictions, metrics["metrics"], OUTPUT_DIR / "expected_power_validation.png")
 
     joblib.dump(model, OUTPUT_DIR / "expected_power_model.pkl")
     (OUTPUT_DIR / "expected_power_feature_order.json").write_text(

@@ -13,7 +13,7 @@ router = APIRouter()
 
 
 @router.get("/api/diagnostics", response_model=DiagnosticsResponse | None)
-async def get_diagnostics(
+def get_diagnostics(
     device_id: str | None = Query(default=None),
     user: dict = Depends(get_current_user),
 ):

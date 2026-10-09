@@ -12,7 +12,7 @@ router = APIRouter()
 
 
 @router.get("/api/expected-power", response_model=ExpectedPowerResponse | None)
-async def get_expected_power(
+def get_expected_power(
     device_id: str | None = Query(default=None),
     user: dict = Depends(get_current_user),
 ):

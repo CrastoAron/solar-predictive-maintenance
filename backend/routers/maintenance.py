@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query, Request
+from starlette.concurrency import run_in_threadpool
 
 from config import DEFAULT_DEVICE_ID, EFFICIENCY_ALERT_MAX_SCORE, FAULT_ALERT_MIN_CLASS
 from dependencies import customer_device_id, get_current_user
@@ -83,10 +84,10 @@ async def get_maintenance(
     device_id: str | None = Query(default=None),
     user: dict = Depends(get_current_user),
 ):
-    resolved_device_id = customer_device_id(user, device_id)
-    influx = get_influx_client()
-    latest = influx.get_latest_prediction(device_id=resolved_device_id)
-    latest_sensor = influx.get_latest_sensor(device_id=resolved_device_id)
+    resolved_device_id = await run_in_threadpool(customer_device_id, user, device_id)
+    influx = await run_in_threadpool(get_influx_client)
+    latest = await run_in_threadpool(influx.get_latest_prediction, device_id=resolved_device_id)
+    latest_sensor = await run_in_threadpool(influx.get_latest_sensor, device_id=resolved_device_id)
     if _is_prediction_stale(latest, latest_sensor):
         # Create an initial prediction after a bucket reset and refresh it when
         # fresh telemetry arrives, so the maintenance page reacts during a demo
@@ -94,18 +95,22 @@ async def get_maintenance(
         scheduler = getattr(request.app.state, "prediction_scheduler", None)
         if scheduler is not None:
             await scheduler.run_prediction_batch(device_id=resolved_device_id)
-            latest = influx.get_latest_prediction(device_id=resolved_device_id)
+            latest = await run_in_threadpool(influx.get_latest_prediction, device_id=resolved_device_id)
         if not latest:
             return None
 
     # Diagnostics must use the same expected-power baseline as /api/diagnostics.
     # It is optional here so a missing baseline asset does not hide ML maintenance data.
     try:
-        recent_sensor_history_df = influx.get_raw_data_last_minutes(device_id=resolved_device_id, minutes=30)
+        recent_sensor_history_df = await run_in_threadpool(
+            influx.get_raw_data_last_minutes,
+            device_id=resolved_device_id,
+            minutes=30,
+        )
         recent_sensor_history = recent_sensor_history_df.to_dict(orient="records")
-        latest_hardware_status = influx.get_latest_hardware_status(resolved_device_id) or {}
+        latest_hardware_status = await run_in_threadpool(influx.get_latest_hardware_status, resolved_device_id) or {}
         baseline = None
-        runner = get_expected_power_runner()
+        runner = await run_in_threadpool(get_expected_power_runner)
         if latest_sensor is not None and runner.is_ready():
             baseline = runner.predict(latest_sensor)
         diagnostics = run_diagnostics(
@@ -122,14 +127,14 @@ async def get_maintenance(
     days_remaining = max(0, int(latest["maintenance_days"]))
 
     try:
-        alerts = influx.get_latest_alerts(device_id=resolved_device_id, limit=50)
+        alerts = await run_in_threadpool(influx.get_latest_alerts, device_id=resolved_device_id, limit=50)
     except Exception:
         alerts = []
     active_alert_count, highest_alert_severity, alert_message = _active_alert_summary(alerts)
     days_remaining = _alert_maintenance_days(days_remaining, highest_alert_severity)
 
     try:
-        scores = influx.get_efficiency_scores_last(device_id=resolved_device_id, limit=6)
+        scores = await run_in_threadpool(influx.get_efficiency_scores_last, device_id=resolved_device_id, limit=6)
     except Exception:
         scores = []
     trend = _trend_label([row["value"] for row in scores])
